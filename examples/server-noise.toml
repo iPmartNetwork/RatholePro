@@ -1,0 +1,19 @@
+# Rathole Pro - Server with Noise Protocol encryption
+# No certificates needed! Just generate a keypair.
+# Generate keys: rathole-pro --gen-key
+
+[server]
+bind_addr = "0.0.0.0:2333"
+default_token = "my_secret_token"
+heartbeat_interval = 30
+
+[server.transport]
+type = "noise"
+
+[server.transport.noise]
+pattern = "Noise_NK_25519_ChaChaPoly_BLAKE2s"
+local_private_key = "BASE64_ENCODED_SERVER_PRIVATE_KEY"
+
+[server.services.ssh]
+bind_addr = "0.0.0.0:5022"
+max_mux_streams = 8

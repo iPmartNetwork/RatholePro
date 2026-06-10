@@ -1,0 +1,17 @@
+# Rathole Pro - Client with TLS encryption
+
+[client]
+remote_addr = "your-server.com:2333"
+default_token = "my_secret_token"
+mux_connections = 4
+
+[client.transport]
+type = "tls"
+
+[client.transport.tls]
+# trusted_root = "/path/to/ca.pem"   # Optional: custom CA (uses system CAs if omitted)
+hostname = "your-server.com"          # SNI hostname for TLS verification
+
+[client.services.web]
+local_addr = "127.0.0.1:80"
+mux_streams = 16

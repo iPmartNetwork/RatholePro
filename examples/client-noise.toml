@@ -1,0 +1,17 @@
+# Rathole Pro - Client with Noise Protocol encryption
+
+[client]
+remote_addr = "your-server.com:2333"
+default_token = "my_secret_token"
+mux_connections = 4
+
+[client.transport]
+type = "noise"
+
+[client.transport.noise]
+pattern = "Noise_NK_25519_ChaChaPoly_BLAKE2s"
+remote_public_key = "BASE64_ENCODED_SERVER_PUBLIC_KEY"
+
+[client.services.ssh]
+local_addr = "127.0.0.1:22"
+mux_streams = 8

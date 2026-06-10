@@ -1,0 +1,22 @@
+# Rathole Pro - Server Configuration Example
+# Place this on your server with a public IP
+
+[server]
+bind_addr = "0.0.0.0:2333"          # Port for client connections
+default_token = "my_secret_token"    # Default authentication token
+heartbeat_interval = 30              # Heartbeat every 30 seconds
+
+[server.services.ssh]
+token = "ssh_secret_token"           # Per-service token (overrides default)
+bind_addr = "0.0.0.0:5022"          # Expose SSH on this port
+max_mux_streams = 8                  # Max multiplexed streams
+
+[server.services.web]
+token = "web_secret_token"
+bind_addr = "0.0.0.0:8080"          # Expose web service
+max_mux_streams = 16                 # More streams for web traffic
+
+[server.services.minecraft]
+token = "mc_secret_token"
+bind_addr = "0.0.0.0:25565"
+max_mux_streams = 4

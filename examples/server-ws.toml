@@ -1,0 +1,17 @@
+# Rathole Pro - Server with WebSocket transport
+# Useful for bypassing firewalls that block non-HTTP traffic
+
+[server]
+bind_addr = "0.0.0.0:8080"
+default_token = "my_secret_token"
+heartbeat_interval = 30
+
+[server.transport]
+type = "ws"
+
+[server.transport.websocket]
+path = "/tunnel"
+
+[server.services.web]
+bind_addr = "0.0.0.0:9090"
+max_mux_streams = 16

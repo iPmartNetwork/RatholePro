@@ -1,0 +1,24 @@
+# Rathole Pro - Client Configuration Example
+# Place this on the device behind NAT
+
+[client]
+remote_addr = "your-server.com:2333"  # Server address
+default_token = "my_secret_token"     # Default authentication token
+heartbeat_timeout = 40                # Heartbeat timeout
+retry_interval = 3                    # Retry every 3 seconds on disconnect
+mux_connections = 4                   # Default mux streams per service
+
+[client.services.ssh]
+token = "ssh_secret_token"
+local_addr = "127.0.0.1:22"          # Forward to local SSH
+mux_streams = 8                      # Override mux streams for this service
+
+[client.services.web]
+token = "web_secret_token"
+local_addr = "127.0.0.1:80"          # Forward to local web server
+mux_streams = 16
+
+[client.services.minecraft]
+token = "mc_secret_token"
+local_addr = "127.0.0.1:25565"       # Forward to local Minecraft server
+mux_streams = 4

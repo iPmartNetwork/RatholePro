@@ -1,0 +1,16 @@
+# Rathole Pro - Client with WebSocket transport
+
+[client]
+remote_addr = "your-server.com:8080"
+default_token = "my_secret_token"
+mux_connections = 4
+
+[client.transport]
+type = "ws"
+
+[client.transport.websocket]
+path = "/tunnel"
+
+[client.services.web]
+local_addr = "127.0.0.1:80"
+mux_streams = 16

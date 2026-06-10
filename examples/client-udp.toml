@@ -1,0 +1,28 @@
+# Rathole Pro - Client with UDP forwarding
+
+[client]
+remote_addr = "your-server.com:2333"
+default_token = "my_secret_token"
+retry_interval = 3
+mux_connections = 4
+
+# TCP service
+[client.services.ssh]
+type = "tcp"
+local_addr = "127.0.0.1:22"
+mux_streams = 8
+
+# UDP service - WireGuard
+[client.services.wireguard]
+type = "udp"
+local_addr = "127.0.0.1:51820"
+
+# UDP service - DNS
+[client.services.dns]
+type = "udp"
+local_addr = "127.0.0.1:53"
+
+# UDP service - Game server
+[client.services.game]
+type = "udp"
+local_addr = "127.0.0.1:27015"

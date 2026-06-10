@@ -1,0 +1,18 @@
+# Rathole Pro - Server with TLS encryption
+# Requires: cert.pem (certificate chain) and key.pem (private key)
+
+[server]
+bind_addr = "0.0.0.0:2333"
+default_token = "my_secret_token"
+heartbeat_interval = 30
+
+[server.transport]
+type = "tls"
+
+[server.transport.tls]
+trusted_root = "/etc/rathole-pro/cert.pem"   # Certificate chain PEM
+pkcs12 = "/etc/rathole-pro/key.pem"          # Private key PEM
+
+[server.services.web]
+bind_addr = "0.0.0.0:8080"
+max_mux_streams = 16

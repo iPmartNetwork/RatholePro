@@ -1,0 +1,28 @@
+# Rathole Pro - Server with UDP forwarding
+# Useful for games (Minecraft, WireGuard, DNS, VoIP, etc.)
+
+[server]
+bind_addr = "0.0.0.0:2333"
+default_token = "my_secret_token"
+heartbeat_interval = 30
+
+# TCP service example
+[server.services.ssh]
+type = "tcp"
+bind_addr = "0.0.0.0:5022"
+max_mux_streams = 8
+
+# UDP service - WireGuard
+[server.services.wireguard]
+type = "udp"
+bind_addr = "0.0.0.0:51820"
+
+# UDP service - DNS
+[server.services.dns]
+type = "udp"
+bind_addr = "0.0.0.0:5353"
+
+# UDP service - Game server
+[server.services.game]
+type = "udp"
+bind_addr = "0.0.0.0:27015"
