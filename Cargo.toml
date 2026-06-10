@@ -1,9 +1,9 @@
 [package]
 name = "rathole-pro"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["iPmart Network (Ali Hassanzadeh)"]
-description = "RatholePro — High-performance reverse proxy tunnel with multiplexing and UDP forwarding."
+description = "RatholePro — Next-generation high-performance reverse proxy tunnel with multiplexing, UDP forwarding, WebSocket, load balancing, HTTP proxy, P2P NAT traversal, and IPv6 support."
 license = "Apache-2.0"
 repository = "https://github.com/iPmartNetwork/RatholePro"
 homepage = "https://github.com/iPmartNetwork/RatholePro"
@@ -23,6 +23,7 @@ uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 hex = "0.4"
 futures = "0.3"
+base64 = "0.22"
 
 [profile.release]
 opt-level = "z"

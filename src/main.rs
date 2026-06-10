@@ -6,14 +6,18 @@ mod client;
 mod mux;
 mod protocol;
 mod udp;
+mod websocket;
+mod load_balancer;
+mod http_proxy;
+mod p2p;
 
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
 #[command(name = "rathole-pro")]
-#[command(version = "0.2.0")]
-#[command(about = "RatholePro v0.2.0 — TCP + UDP + Multiplexing tunnel\nDeveloper: iPmart Network (Ali Hassanzadeh)")]
+#[command(version = "0.3.0")]
+#[command(about = "RatholePro v0.3.0 — Full-featured tunnel: TCP/UDP/WS + Mux + LB + P2P\nDeveloper: iPmart Network (Ali Hassanzadeh)")]
 struct Cli {
     #[arg(value_name = "CONFIG")]
     config: Option<String>,
@@ -23,6 +27,9 @@ struct Cli {
     client: bool,
     #[arg(long)]
     validate: bool,
+    /// Generate Noise keypair
+    #[arg(long)]
+    gen_key: bool,
 }
 
 #[tokio::main]
@@ -31,11 +38,17 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
     let cli = Cli::parse();
+
+    if cli.gen_key {
+        p2p::gen_noise_keypair();
+        return Ok(());
+    }
+
     let path = cli.config.as_deref()
-        .ok_or_else(|| anyhow::anyhow!("Usage: rathole-pro <CONFIG>"))?;
+        .ok_or_else(|| anyhow::anyhow!("Usage: rathole-pro <CONFIG>\n       rathole-pro --gen-key"))?;
     tracing::info!("RatholePro v{}", env!("CARGO_PKG_VERSION"));
     let config = config::load_config(path)?;
-    if cli.validate { println!("OK"); return Ok(()); }
+    if cli.validate { println!("✓ Config OK"); return Ok(()); }
     match config::determine_mode(&config, cli.server, cli.client) {
         config::RunMode::Server => server::run(config).await?,
         config::RunMode::Client => client::run(config).await?,
