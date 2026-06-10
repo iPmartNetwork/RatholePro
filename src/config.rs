@@ -13,8 +13,7 @@ pub struct ServerConfig {
     pub bind_addr: String,
     pub default_token: Option<String>,
     pub heartbeat_interval: Option<u64>,
-    pub transport: Option<TransportConfig>,
-    pub services: HashMap<String, ServerServiceConfig>,
+    pub services: HashMap<String, ServiceConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,54 +23,25 @@ pub struct ClientConfig {
     pub heartbeat_timeout: Option<u64>,
     pub retry_interval: Option<u64>,
     pub mux_connections: Option<u32>,
-    pub transport: Option<TransportConfig>,
-    pub services: HashMap<String, ClientServiceConfig>,
+    pub services: HashMap<String, ServiceConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TransportConfig {
-    #[serde(rename = "type", default = "default_transport")]
-    pub transport_type: String,
-    pub tls: Option<TlsConfig>,
-    pub noise: Option<NoiseConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TlsConfig {
-    pub cert: Option<String>,
-    pub key: Option<String>,
-    pub hostname: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NoiseConfig {
-    pub local_private_key: Option<String>,
-    pub remote_public_key: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerServiceConfig {
-    #[serde(rename = "type", default = "default_service_type")]
+pub struct ServiceConfig {
+    #[serde(rename = "type", default = "default_tcp")]
     pub service_type: String,
     pub token: Option<String>,
-    pub bind_addr: String,
-    pub nodelay: Option<bool>,
-    pub max_mux_streams: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClientServiceConfig {
-    #[serde(rename = "type", default = "default_service_type")]
-    pub service_type: String,
-    pub token: Option<String>,
-    pub local_addr: String,
+    #[serde(default)]
+    pub bind_addr: Option<String>,
+    #[serde(default)]
+    pub local_addr: Option<String>,
     pub nodelay: Option<bool>,
     pub mux_streams: Option<u32>,
+    pub max_mux_streams: Option<u32>,
     pub retry_interval: Option<u64>,
 }
 
-fn default_transport() -> String { "tcp".to_string() }
-fn default_service_type() -> String { "tcp".to_string() }
+fn default_tcp() -> String { "tcp".to_string() }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunMode { Server, Client }
@@ -82,7 +52,7 @@ pub fn load_config(path: &str) -> anyhow::Result<Config> {
     let config: Config = toml::from_str(&content)
         .map_err(|e| anyhow::anyhow!("Parse error '{}': {}", path, e))?;
     if config.server.is_none() && config.client.is_none() {
-        return Err(anyhow::anyhow!("Config needs [server] or [client]"));
+        return Err(anyhow::anyhow!("Need [server] or [client]"));
     }
     Ok(config)
 }
