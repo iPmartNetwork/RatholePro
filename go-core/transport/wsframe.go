@@ -61,21 +61,12 @@ func (ws *WSConn) Write(b []byte) (int, error) {
 	ws.writeMu.Lock()
 	defer ws.writeMu.Unlock()
 
-	// Send in chunks to reduce per-frame overhead
-	total := 0
-	for len(b) > 0 {
-		chunk := b
-		if len(chunk) > 65535 {
-			chunk = b[:65535]
-		}
-		err := ws.writeFrame(0x02, chunk)
-		if err != nil {
-			return total, err
-		}
-		total += len(chunk)
-		b = b[len(chunk):]
+	// Write as binary frame (opcode 0x02)
+	err := ws.writeFrame(0x02, b)
+	if err != nil {
+		return 0, err
 	}
-	return total, nil
+	return len(b), nil
 }
 
 // readFrame reads one WebSocket frame and returns the payload.
@@ -201,20 +192,7 @@ func (ws *WSConn) writeFrame(opcode byte, payload []byte) error {
 		rand.Read(maskKey[:])
 		copy(frame[pos:], maskKey[:])
 		pos += 4
-		// Fast XOR masking using 4-byte aligned operations
-		maskWord := uint32(maskKey[0])<<24 | uint32(maskKey[1])<<16 | uint32(maskKey[2])<<8 | uint32(maskKey[3])
-		i := 0
-		// Process 4 bytes at a time
-		for ; i+4 <= length; i += 4 {
-			v := uint32(payload[i])<<24 | uint32(payload[i+1])<<16 | uint32(payload[i+2])<<8 | uint32(payload[i+3])
-			v ^= maskWord
-			frame[pos+i] = byte(v >> 24)
-			frame[pos+i+1] = byte(v >> 16)
-			frame[pos+i+2] = byte(v >> 8)
-			frame[pos+i+3] = byte(v)
-		}
-		// Handle remaining bytes
-		for ; i < length; i++ {
+		for i := 0; i < length; i++ {
 			frame[pos+i] = payload[i] ^ maskKey[i%4]
 		}
 	} else {

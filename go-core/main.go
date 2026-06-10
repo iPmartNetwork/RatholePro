@@ -12,7 +12,7 @@ import (
 	"github.com/iPmartNetwork/RatholePro/go-core/transport"
 )
 
-const version = "0.4.2"
+const version = "0.4.3"
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
