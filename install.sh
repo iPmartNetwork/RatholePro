@@ -1070,30 +1070,33 @@ uninstall() {
     echo "    - Binary: ${RATHOLE_PRO_DIR}/"
     echo "    - Config: ${CONFIG_DIR}/"
     echo "    - Logs:   ${LOG_DIR}/"
+    echo "    - Symlink: /usr/local/bin/${BINARY_NAME}"
     echo "    - Systemd services"
     echo ""
-    echo -n "  Proceed with uninstall? (y/n): "
+    echo -n "  Type 'yes' to confirm: "
     read -r answer
-    if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+    if [[ "$answer" != "yes" ]]; then
         print_info "Cancelled."
         return
     fi
 
-    # Stop services
-    systemctl stop "${SERVICE_PREFIX}-server" 2>/dev/null
-    systemctl stop "${SERVICE_PREFIX}-client" 2>/dev/null
-    systemctl disable "${SERVICE_PREFIX}-server" 2>/dev/null
-    systemctl disable "${SERVICE_PREFIX}-client" 2>/dev/null
+    echo ""
+    print_step "Stopping services..."
+    systemctl stop "${SERVICE_PREFIX}-server" 2>/dev/null || true
+    systemctl stop "${SERVICE_PREFIX}-client" 2>/dev/null || true
+    systemctl disable "${SERVICE_PREFIX}-server" 2>/dev/null || true
+    systemctl disable "${SERVICE_PREFIX}-client" 2>/dev/null || true
 
-    # Remove service files
+    print_step "Removing service files..."
     rm -f "/etc/systemd/system/${SERVICE_PREFIX}-server.service"
     rm -f "/etc/systemd/system/${SERVICE_PREFIX}-client.service"
-    systemctl daemon-reload
+    systemctl daemon-reload 2>/dev/null || true
 
-    # Remove files
+    print_step "Removing files..."
     rm -rf "${RATHOLE_PRO_DIR}"
     rm -rf "${CONFIG_DIR}"
     rm -rf "${LOG_DIR}"
+    rm -f "/usr/local/bin/${BINARY_NAME}"
 
     echo ""
     print_success "Rathole Pro completely uninstalled."
