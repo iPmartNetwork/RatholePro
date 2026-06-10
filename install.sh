@@ -528,24 +528,27 @@ EOF
     print_info "Start with: systemctl start ${service_name}"
 }
 
-# ─── Server Configuration ──────────────────────────────────────
+# ─── IRAN Server Configuration ─────────────────────────────────
 
-configure_server() {
+configure_iran() {
     echo ""
     print_divider
-    echo -e "  ${BOLD}Server Configuration${NC}"
-    echo -e "  ${DIM}(Server = this machine LISTENS for tunnel connections)${NC}"
-    echo -e "  ${DIM}(Install Server on the machine that RECEIVES connections from users)${NC}"
+    echo -e "  ${BOLD}IRAN Server Setup${NC}"
+    echo -e "  ${CYAN}╔═══════════════════════════════════════════════╗${NC}"
+    echo -e "  ${CYAN}║  This is your IRAN server.                   ║${NC}"
+    echo -e "  ${CYAN}║  Users connect to THIS IP.                   ║${NC}"
+    echo -e "  ${CYAN}║  Traffic goes: User → Iran → Tunnel → Kharej ║${NC}"
+    echo -e "  ${CYAN}╚═══════════════════════════════════════════════╝${NC}"
     print_divider
     echo ""
 
-    echo -e "  ${CYAN}Tunnel port (clients connect TO this port):${NC}"
+    echo -e "  ${CYAN}Tunnel port (a free port for tunnel connection):${NC}"
     echo -n "  Port [2333]: "; read -r server_port
     server_port="${server_port:-2333}"
     bind_addr="0.0.0.0:${server_port}"
 
     echo ""
-    echo -e "  ${CYAN}Authentication token (shared secret between server & client):${NC}"
+    echo -e "  ${CYAN}Token (a password - same on both Iran & Kharej):${NC}"
     echo -n "  Token (empty=auto): "; read -r default_token
     if [[ -z "${default_token}" ]]; then
         default_token=$(generate_token)
@@ -553,10 +556,8 @@ configure_server() {
     fi
 
     echo ""
-    echo -e "  ${CYAN}Transport (how data is encrypted/transferred):${NC}"
     select_transport
 
-    # Write config
     mkdir -p "${CONFIG_DIR}"
     local config_file="${CONFIG_DIR}/server.toml"
     cat > "${config_file}" << EOF
@@ -567,22 +568,42 @@ heartbeat_interval = 30
 EOF
     configure_transport_server "${config_file}"
 
-    # Services
     echo ""
     print_divider
-    echo -e "  ${BOLD}Add Services (ports to expose)${NC}"
-    echo -e "  ${DIM}Each service = one port that users can connect to on THIS server${NC}"
-    echo -e "  ${DIM}Traffic is forwarded through tunnel to the Client machine${NC}"
+    echo -e "  ${BOLD}Add Ports (which ports should users connect to on Iran?)${NC}"
+    echo -e "  ${DIM}Example: if your panel is on port 2083, add port 2083 here.${NC}"
+    echo -e "  ${DIM}Users will connect to IRAN_IP:2083 and traffic goes to Kharej.${NC}"
     print_divider
-    add_services_server "${config_file}"
+
+    local add_more="y"
+    while [[ "${add_more}" =~ ^[Yy]$ ]]; do
+        echo ""
+        echo -n "  Service name (any name, e.g., panel): "; read -r svc_name
+        if [[ -z "${svc_name}" ]]; then continue; fi
+
+        echo -n "  Port number (e.g., 2083): "; read -r svc_port
+        if [[ -z "${svc_port}" ]]; then continue; fi
+
+        cat >> "${config_file}" << EOF
+
+[server.services.${svc_name}]
+type = "tcp"
+bind_addr = "0.0.0.0:${svc_port}"
+max_mux_streams = 8
+EOF
+        print_success "Port ${svc_port} added as '${svc_name}'"
+        echo ""
+        echo -n "  Add another port? (y/n): "; read -r add_more
+    done
 
     echo ""
-    print_success "Server config saved: ${config_file}"
+    print_success "Config saved: ${config_file}"
     echo ""
     echo -e "  ${YELLOW}════════════════════════════════════════════${NC}"
-    echo -e "  ${YELLOW}  SAVE THIS INFO FOR CLIENT SETUP:${NC}"
-    echo -e "  ${YELLOW}  Token:  ${default_token}${NC}"
-    echo -e "  ${YELLOW}  Port:   ${server_port}${NC}"
+    echo -e "  ${YELLOW}  COPY THIS FOR KHAREJ SETUP:${NC}"
+    echo -e "  ${YELLOW}  Token:       ${default_token}${NC}"
+    echo -e "  ${YELLOW}  Tunnel Port: ${server_port}${NC}"
+    echo -e "  ${YELLOW}  Service(s):  check config above${NC}"
     echo -e "  ${YELLOW}════════════════════════════════════════════${NC}"
     echo ""
 
@@ -642,26 +663,30 @@ EOF
     done
 }
 
-# ─── Client Configuration ──────────────────────────────────────
+# ─── KHAREJ Server Configuration ───────────────────────────────
 
-configure_client() {
+configure_kharej() {
     echo ""
     print_divider
-    echo -e "  ${BOLD}Client Configuration${NC}"
-    echo -e "  ${DIM}(Client = this machine has a LOCAL SERVICE to expose)${NC}"
-    echo -e "  ${DIM}(Client connects TO the Server and forwards local traffic)${NC}"
+    echo -e "  ${BOLD}KHAREJ Server Setup${NC}"
+    echo -e "  ${CYAN}╔═══════════════════════════════════════════════╗${NC}"
+    echo -e "  ${CYAN}║  This is your KHAREJ (abroad) server.        ║${NC}"
+    echo -e "  ${CYAN}║  Your panel/service runs HERE.               ║${NC}"
+    echo -e "  ${CYAN}║  Traffic goes: Iran → Tunnel → Kharej:local  ║${NC}"
+    echo -e "  ${CYAN}╚═══════════════════════════════════════════════╝${NC}"
     print_divider
     echo ""
 
-    echo -e "  ${CYAN}Server address (IP:PORT of the SERVER machine):${NC}"
-    echo -n "  Server address: "; read -r remote_addr
+    echo -e "  ${CYAN}Iran server address (IP:PORT of your IRAN server):${NC}"
+    echo -e "  ${DIM}  Use the tunnel port you set on Iran (e.g., 1.2.3.4:2333)${NC}"
+    echo -n "  Iran address: "; read -r remote_addr
     if [[ -z "${remote_addr}" ]]; then
-        print_error "Server address is required!"
+        print_error "Iran server address is required!"
         return 1
     fi
 
     echo ""
-    echo -e "  ${CYAN}Token (must match the Server's token):${NC}"
+    echo -e "  ${CYAN}Token (must be SAME as Iran server):${NC}"
     echo -n "  Token: "; read -r default_token
     if [[ -z "${default_token}" ]]; then
         print_error "Token is required!"
@@ -669,10 +694,8 @@ configure_client() {
     fi
 
     echo ""
-    echo -e "  ${CYAN}Transport (must match Server's transport):${NC}"
     select_transport
 
-    # Write config
     mkdir -p "${CONFIG_DIR}"
     local config_file="${CONFIG_DIR}/client.toml"
     cat > "${config_file}" << EOF
@@ -685,17 +708,41 @@ mux_connections = 4
 EOF
     configure_transport_client "${config_file}" "${remote_addr}"
 
-    # Services
     echo ""
     print_divider
-    echo -e "  ${BOLD}Add Services (local ports to forward)${NC}"
-    echo -e "  ${DIM}Service name MUST match the Server's service name exactly!${NC}"
-    echo -e "  ${DIM}Local address = where YOUR service runs on THIS machine${NC}"
+    echo -e "  ${BOLD}Add Services (local ports to forward through tunnel)${NC}"
+    echo -e "  ${DIM}Service name MUST be the same name you used on Iran!${NC}"
+    echo -e "  ${DIM}Local address = where your panel/service runs on THIS machine.${NC}"
+    echo -e "  ${DIM}Example: if panel runs on port 2083 → local address: 127.0.0.1:2083${NC}"
     print_divider
-    add_services_client "${config_file}"
+
+    local add_more="y"
+    while [[ "${add_more}" =~ ^[Yy]$ ]]; do
+        echo ""
+        echo -n "  Service name (SAME as Iran, e.g., panel): "; read -r svc_name
+        if [[ -z "${svc_name}" ]]; then continue; fi
+
+        echo -e "  ${DIM}  Where does your service run on this machine?${NC}"
+        echo -n "  Local address (e.g., 127.0.0.1:2083): "; read -r local_addr
+        if [[ -z "${local_addr}" ]]; then
+            print_error "Local address is required!"
+            continue
+        fi
+
+        cat >> "${config_file}" << EOF
+
+[client.services.${svc_name}]
+type = "tcp"
+local_addr = "${local_addr}"
+mux_streams = 4
+EOF
+        print_success "Service '${svc_name}' → ${local_addr}"
+        echo ""
+        echo -n "  Add another service? (y/n): "; read -r add_more
+    done
 
     echo ""
-    print_success "Client config saved: ${config_file}"
+    print_success "Config saved: ${config_file}"
     echo ""
 
     create_systemd_service "client"
@@ -1071,10 +1118,13 @@ main_menu() {
         print_banner
         echo -e "  ${BOLD}Main Menu${NC}"
         echo ""
-        echo -e "    ${GREEN} 1)${NC} Install Binary (download rathole-pro)"
-        echo -e "    ${GREEN} 2)${NC} Configure Server ${DIM}(this machine LISTENS, users connect here)${NC}"
-        echo -e "    ${GREEN} 3)${NC} Configure Client ${DIM}(this machine has a local service to forward)${NC}"
+        echo -e "    ${GREEN} 1)${NC} Install Binary"
         echo ""
+        echo -e "    ${CYAN}── Setup Tunnel ──${NC}"
+        echo -e "    ${GREEN} 2)${NC} Configure IRAN Server   ${DIM}(users connect to Iran IP)${NC}"
+        echo -e "    ${GREEN} 3)${NC} Configure KHAREJ Server ${DIM}(panel/service runs here)${NC}"
+        echo ""
+        echo -e "    ${CYAN}── Manage ──${NC}"
         echo -e "    ${GREEN} 4)${NC} Start Service"
         echo -e "    ${GREEN} 5)${NC} Stop Service"
         echo -e "    ${GREEN} 6)${NC} Restart Service"
@@ -1091,8 +1141,8 @@ main_menu() {
 
         case "${choice}" in
             1)  full_install ;;
-            2)  check_root; configure_server ;;
-            3)  check_root; configure_client ;;
+            2)  check_root; configure_iran ;;
+            3)  check_root; configure_kharej ;;
             4)  check_root; start_service ;;
             5)  check_root; stop_service ;;
             6)  check_root; restart_service ;;
