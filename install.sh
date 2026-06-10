@@ -36,7 +36,7 @@ readonly CONFIG_DIR="/etc/rathole-pro"
 readonly LOG_DIR="/var/log/rathole-pro"
 readonly BINARY_NAME="rathole-pro"
 readonly GITHUB_REPO="iPmartNetwork/RatholePro"
-readonly APP_VERSION="0.3.0"
+readonly APP_VERSION="0.4.0"
 readonly SERVICE_PREFIX="rathole-pro"
 readonly AUTHOR="iPmart Network (Ali Hassanzadeh)"
 
@@ -169,6 +169,9 @@ download_binary() {
     mkdir -p "${RATHOLE_PRO_DIR}"
     mkdir -p "${CONFIG_DIR}"
     mkdir -p "${LOG_DIR}"
+
+    # Remove old binary to ensure fresh download
+    rm -f "${RATHOLE_PRO_DIR}/${BINARY_NAME}" 2>/dev/null
 
     # Determine the correct asset name based on architecture
     local asset_name=""
