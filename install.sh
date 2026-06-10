@@ -58,6 +58,16 @@ print_banner() {
     echo "║                                                           ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
+
+    # Show binary status
+    if [[ -x "${RATHOLE_PRO_DIR}/${BINARY_NAME}" ]]; then
+        local ver
+        ver=$("${RATHOLE_PRO_DIR}/${BINARY_NAME}" --version 2>/dev/null | awk '{print $NF}')
+        echo -e "  ${GREEN}● Binary: Installed (v${ver:-unknown})${NC}"
+    else
+        echo -e "  ${RED}● Binary: NOT INSTALLED${NC}"
+    fi
+    echo ""
 }
 
 print_info()    { echo -e "  ${BLUE}[INFO]${NC} $1"; }
