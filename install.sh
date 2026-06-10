@@ -537,10 +537,6 @@ EOF
     create_systemd_service "server"
 }
 
-    # Create systemd service
-    create_systemd_service "server"
-}
-
 add_services_server() {
     local config_file="$1"
     local add_more="y"
