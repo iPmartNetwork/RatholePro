@@ -63,7 +63,8 @@ print_divider() { echo -e "  ${DIM}───────────────
 
 confirm_action() {
     local prompt="${1:-Are you sure?}"
-    read -rp "  $prompt (y/n): " answer
+    echo ""
+    read -rp "  ${prompt} (y/n): " answer
     [[ "$answer" =~ ^[Yy]$ ]]
 }
 
@@ -1026,8 +1027,9 @@ uninstall() {
     echo "    - Logs:   ${LOG_DIR}/"
     echo "    - Systemd services"
     echo ""
-
-    if ! confirm_action "Proceed with uninstall?"; then
+    echo -n "  Proceed with uninstall? (y/n): "
+    read -r answer
+    if [[ ! "$answer" =~ ^[Yy]$ ]]; then
         print_info "Cancelled."
         return
     fi
