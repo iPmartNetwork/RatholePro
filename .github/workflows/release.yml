@@ -17,14 +17,12 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-22.04
             asset_name: rathole-pro-x86_64-linux
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-22.04
             asset_name: rathole-pro-aarch64-linux
-          - target: armv7-unknown-linux-gnueabihf
-            os: ubuntu-latest
-            asset_name: rathole-pro-armv7-linux
+            use_cross: true
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             asset_name: rathole-pro-x86_64-windows.exe
@@ -42,34 +40,27 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross-compilation tools (aarch64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Install cross
+        if: matrix.use_cross == true
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
-      - name: Install cross-compilation tools (armv7)
-        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-arm-linux-gnueabihf
+      - name: Build with cross
+        if: matrix.use_cross == true
+        run: cross build --release --target ${{ matrix.target }}
 
-      - name: Build
+      - name: Build native
+        if: matrix.use_cross != true
         run: cargo build --release --target ${{ matrix.target }}
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
 
-      - name: Package binary (Linux/macOS)
+      - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
           cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} ${{ matrix.asset_name }}
           chmod +x ${{ matrix.asset_name }}
 
-      - name: Package binary (Windows)
+      - name: Package (Windows)
         if: runner.os == 'Windows'
-        run: |
-          cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe ${{ matrix.asset_name }}
+        run: cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe ${{ matrix.asset_name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -81,19 +72,16 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
-
     permissions:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Prepare release assets
+      - name: Prepare
         run: |
           mkdir -p release
           find artifacts -type f -exec cp {} release/ \;
@@ -105,41 +93,27 @@ jobs:
           name: "RatholePro ${{ github.ref_name }}"
           body: |
             ## RatholePro ${{ github.ref_name }}
-
-            **Next-generation high-performance reverse proxy tunnel**
-            Developer: iPmart Network (Ali Hassanzadeh)
-
-            ### Features
-            - Multi-Transport: TCP, TLS, Noise Protocol, WebSocket, WSS, QUIC
-            - Multiplexing: Multiple streams over single connection
-            - UDP Forwarding: Games, VPN, DNS, VoIP
-            - Load Balancing: Round Robin, Random, Least Connections
-            - P2P NAT Traversal: STUN/TURN support
-            - HTTP/HTTPS Proxy
-            - IPv6 Support
-            - Config Validation
-
-            ### Download & Install (Linux)
+            
+            **Developer:** iPmart Network (Ali Hassanzadeh)
+            
+            ### What's New
+            - TCP + TLS + Noise Protocol transports
+            - UDP forwarding (WireGuard, DNS, games)
+            - Stream multiplexing over single connection
+            - `--gen-key` for Noise keypair generation
+            - `--validate` for config testing
+            
+            ### Install (Linux)
             ```bash
             bash <(curl -Ls https://raw.githubusercontent.com/iPmartNetwork/RatholePro/master/install.sh)
             ```
-
+            
             ### Manual Download
-            | Platform | Architecture | File |
-            |----------|-------------|------|
-            | Linux | x86_64 (AMD/Intel) | `rathole-pro-x86_64-linux` |
-            | Linux | aarch64 (ARM64) | `rathole-pro-aarch64-linux` |
-            | Linux | armv7 (ARM32) | `rathole-pro-armv7-linux` |
-            | Windows | x86_64 | `rathole-pro-x86_64-windows.exe` |
-            | macOS | x86_64 | `rathole-pro-x86_64-macos` |
-
-            ### Quick Start
-            ```bash
-            # Server (public IP)
-            ./rathole-pro server.toml
-
-            # Client (behind NAT)
-            ./rathole-pro client.toml
-            ```
+            | Platform | File |
+            |----------|------|
+            | Linux x86_64 | `rathole-pro-x86_64-linux` |
+            | Linux ARM64 | `rathole-pro-aarch64-linux` |
+            | Windows x64 | `rathole-pro-x86_64-windows.exe` |
+            | macOS x64 | `rathole-pro-x86_64-macos` |
           files: release/*
           fail_on_unmatched_files: false
