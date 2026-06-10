@@ -154,48 +154,110 @@ install_dependencies() {
 }
 
 download_binary() {
-    print_step "Downloading Rathole Pro v${VERSION} for ${ARCH}..."
+    print_step "Downloading RatholePro for ${ARCH}..."
     mkdir -p "${RATHOLE_PRO_DIR}"
     mkdir -p "${CONFIG_DIR}"
     mkdir -p "${LOG_DIR}"
 
-    local download_url="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${BINARY_NAME}-${ARCH}-unknown-linux-gnu.tar.gz"
-    local tmp_file="/tmp/${BINARY_NAME}-${ARCH}.tar.gz"
+    # Determine the correct asset name based on architecture
+    local asset_name=""
+    case "${ARCH}" in
+        x86_64)   asset_name="${BINARY_NAME}-x86_64-linux" ;;
+        aarch64)  asset_name="${BINARY_NAME}-aarch64-linux" ;;
+        armv7)    asset_name="${BINARY_NAME}-armv7-linux" ;;
+        i686)     asset_name="${BINARY_NAME}-i686-linux" ;;
+        mips)     asset_name="${BINARY_NAME}-mips-linux" ;;
+        *)        asset_name="${BINARY_NAME}-${ARCH}-linux" ;;
+    esac
 
-    # Try download
+    # Try to get latest release version from GitHub API
+    local latest_version="${VERSION}"
+    if command -v curl &>/dev/null && command -v jq &>/dev/null; then
+        local api_response
+        api_response=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null)
+        if [[ -n "${api_response}" ]]; then
+            local tag
+            tag=$(echo "${api_response}" | jq -r '.tag_name // empty' 2>/dev/null)
+            if [[ -n "${tag}" ]]; then
+                latest_version="${tag#v}"
+                print_info "Latest release: v${latest_version}"
+            fi
+        fi
+    fi
+
+    # Download URL from GitHub Releases
+    local download_url="https://github.com/${GITHUB_REPO}/releases/download/v${latest_version}/${asset_name}"
+    local tmp_file="/tmp/${asset_name}"
+
+    print_info "Downloading: ${download_url}"
+
+    # Download binary
+    local download_ok=false
     if command -v curl &>/dev/null; then
-        curl -fsSL -o "${tmp_file}" "${download_url}" 2>/dev/null
+        if curl -fsSL -o "${tmp_file}" "${download_url}" 2>/dev/null; then
+            download_ok=true
+        fi
     elif command -v wget &>/dev/null; then
-        wget -q -O "${tmp_file}" "${download_url}" 2>/dev/null
+        if wget -q -O "${tmp_file}" "${download_url}" 2>/dev/null; then
+            download_ok=true
+        fi
     fi
 
-    if [[ -f "${tmp_file}" ]]; then
-        tar -xzf "${tmp_file}" -C "${RATHOLE_PRO_DIR}/" 2>/dev/null && {
-            chmod +x "${RATHOLE_PRO_DIR}/${BINARY_NAME}"
-            rm -f "${tmp_file}"
-            print_success "Binary installed: ${RATHOLE_PRO_DIR}/${BINARY_NAME}"
-            return 0
-        }
+    # If direct binary didn't work, try .tar.gz format
+    if [[ "${download_ok}" != true ]]; then
+        local tar_url="https://github.com/${GITHUB_REPO}/releases/download/v${latest_version}/${asset_name}.tar.gz"
+        local tar_file="/tmp/${asset_name}.tar.gz"
+        print_info "Trying archive format..."
+
+        if command -v curl &>/dev/null; then
+            curl -fsSL -o "${tar_file}" "${tar_url}" 2>/dev/null
+        elif command -v wget &>/dev/null; then
+            wget -q -O "${tar_file}" "${tar_url}" 2>/dev/null
+        fi
+
+        if [[ -f "${tar_file}" ]] && [[ -s "${tar_file}" ]]; then
+            tar -xzf "${tar_file}" -C "${RATHOLE_PRO_DIR}/" 2>/dev/null && {
+                download_ok=true
+                rm -f "${tar_file}"
+            }
+        fi
     fi
 
-    # Fallback: try direct binary download
-    local direct_url="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${BINARY_NAME}-${ARCH}-linux"
-    if command -v curl &>/dev/null; then
-        curl -fsSL -o "${RATHOLE_PRO_DIR}/${BINARY_NAME}" "${direct_url}" 2>/dev/null
-    elif command -v wget &>/dev/null; then
-        wget -q -O "${RATHOLE_PRO_DIR}/${BINARY_NAME}" "${direct_url}" 2>/dev/null
-    fi
-
-    if [[ -f "${RATHOLE_PRO_DIR}/${BINARY_NAME}" ]] && [[ -s "${RATHOLE_PRO_DIR}/${BINARY_NAME}" ]]; then
+    # Install the binary
+    if [[ "${download_ok}" == true ]] && [[ -f "${tmp_file}" ]] && [[ -s "${tmp_file}" ]]; then
+        mv "${tmp_file}" "${RATHOLE_PRO_DIR}/${BINARY_NAME}"
         chmod +x "${RATHOLE_PRO_DIR}/${BINARY_NAME}"
         print_success "Binary installed: ${RATHOLE_PRO_DIR}/${BINARY_NAME}"
+
+        # Verify binary works
+        if "${RATHOLE_PRO_DIR}/${BINARY_NAME}" --version &>/dev/null; then
+            local installed_ver
+            installed_ver=$("${RATHOLE_PRO_DIR}/${BINARY_NAME}" --version 2>/dev/null | awk '{print $NF}')
+            print_success "Version: ${installed_ver}"
+        fi
+
+        # Add to PATH via symlink
+        ln -sf "${RATHOLE_PRO_DIR}/${BINARY_NAME}" /usr/local/bin/${BINARY_NAME} 2>/dev/null
+        print_info "Symlinked to /usr/local/bin/${BINARY_NAME}"
+    elif [[ -x "${RATHOLE_PRO_DIR}/${BINARY_NAME}" ]]; then
+        # Already installed from tar extraction
+        chmod +x "${RATHOLE_PRO_DIR}/${BINARY_NAME}"
+        ln -sf "${RATHOLE_PRO_DIR}/${BINARY_NAME}" /usr/local/bin/${BINARY_NAME} 2>/dev/null
+        print_success "Binary installed: ${RATHOLE_PRO_DIR}/${BINARY_NAME}"
     else
-        print_error "Download failed. Build from source instead:"
+        print_error "Download failed!"
+        echo ""
+        echo -e "  ${YELLOW}No release found for your architecture (${ARCH}).${NC}"
+        echo -e "  ${YELLOW}Build from source:${NC}"
+        echo ""
         echo "    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+        echo "    source ~/.cargo/env"
         echo "    git clone https://github.com/${GITHUB_REPO}.git"
-        echo "    cd ${BINARY_NAME} && cargo build --release"
-        echo "    cp target/release/${BINARY_NAME} ${RATHOLE_PRO_DIR}/"
-        rm -f "${tmp_file}" "${RATHOLE_PRO_DIR}/${BINARY_NAME}" 2>/dev/null
+        echo "    cd RatholePro && cargo build --release"
+        echo "    sudo cp target/release/${BINARY_NAME} ${RATHOLE_PRO_DIR}/"
+        echo "    sudo ln -sf ${RATHOLE_PRO_DIR}/${BINARY_NAME} /usr/local/bin/${BINARY_NAME}"
+        echo ""
+        rm -f "${tmp_file}" 2>/dev/null
         exit 1
     fi
 }
