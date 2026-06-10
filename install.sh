@@ -64,7 +64,7 @@ print_divider() { echo -e "  ${DIM}───────────────
 confirm_action() {
     local prompt="${1:-Are you sure?}"
     echo ""
-    read -rp "  ${prompt} (y/n): " answer
+    echo -n "  ${prompt} (y/n): "; read -r answer
     [[ "$answer" =~ ^[Yy]$ ]]
 }
 
@@ -298,7 +298,7 @@ select_transport() {
     echo -e "    ${GREEN}5)${NC} wss   ${DIM}- WebSocket + TLS (secure + bypass)${NC}"
     echo -e "    ${GREEN}6)${NC} quic  ${DIM}- QUIC (UDP-based, low latency, built-in TLS)${NC}"
     echo ""
-    read -rp "  Choice [1]: " transport_choice
+    echo -n "  Choice [1]: "; read -r transport_choice
 
     case "${transport_choice:-1}" in
         1) TRANSPORT="tcp" ;;
@@ -325,8 +325,8 @@ EOF
         tls)
             echo ""
             print_step "TLS Configuration (Server)"
-            read -rp "  Certificate PEM path: " cert_path
-            read -rp "  Private key PEM path: " key_path
+            echo -n "  Certificate PEM path: "; read -r cert_path
+            echo -n "  Private key PEM path: "; read -r key_path
 
             if [[ ! -f "${cert_path}" ]]; then
                 print_warning "Certificate file not found: ${cert_path}"
@@ -366,7 +366,7 @@ EOF
         ws|wss)
             echo ""
             print_step "WebSocket Configuration (Server)"
-            read -rp "  WebSocket path [/tunnel]: " ws_path
+            echo -n "  WebSocket path [/tunnel]: "; read -r ws_path
             ws_path="${ws_path:-/tunnel}"
 
             cat >> "${config_file}" << EOF
@@ -375,8 +375,8 @@ EOF
 path = "${ws_path}"
 EOF
             if [[ "${TRANSPORT}" == "wss" ]]; then
-                read -rp "  Certificate PEM path: " cert_path
-                read -rp "  Private key PEM path: " key_path
+                echo -n "  Certificate PEM path: "; read -r cert_path
+                echo -n "  Private key PEM path: "; read -r key_path
                 cat >> "${config_file}" << EOF
 
 [server.transport.tls]
@@ -388,8 +388,8 @@ EOF
         quic)
             echo ""
             print_step "QUIC Configuration (Server)"
-            read -rp "  Certificate PEM path: " cert_path
-            read -rp "  Private key PEM path: " key_path
+            echo -n "  Certificate PEM path: "; read -r cert_path
+            echo -n "  Private key PEM path: "; read -r key_path
 
             cat >> "${config_file}" << EOF
 
@@ -419,9 +419,9 @@ EOF
             print_step "TLS Configuration (Client)"
             local hostname
             hostname=$(echo "${remote_addr}" | cut -d: -f1)
-            read -rp "  TLS hostname [${hostname}]: " tls_host
+            echo -n "  TLS hostname [${hostname}]: "; read -r tls_host
             tls_host="${tls_host:-${hostname}}"
-            read -rp "  CA cert path (empty=system CAs): " ca_path
+            echo -n "  CA cert path (empty=system CAs): "; read -r ca_path
 
             cat >> "${config_file}" << EOF
 
@@ -435,7 +435,7 @@ EOF
         noise)
             echo ""
             print_step "Noise Protocol Configuration (Client)"
-            read -rp "  Server public key (base64): " server_pub_key
+            echo -n "  Server public key (base64): "; read -r server_pub_key
 
             if [[ -z "${server_pub_key}" ]]; then
                 print_error "Server public key is required for Noise transport!"
@@ -452,7 +452,7 @@ EOF
         ws|wss)
             echo ""
             print_step "WebSocket Configuration (Client)"
-            read -rp "  WebSocket path [/tunnel]: " ws_path
+            echo -n "  WebSocket path [/tunnel]: "; read -r ws_path
             ws_path="${ws_path:-/tunnel}"
 
             cat >> "${config_file}" << EOF
@@ -464,7 +464,7 @@ EOF
         quic)
             echo ""
             print_step "QUIC Configuration (Client)"
-            read -rp "  CA cert path (empty=system CAs): " ca_path
+            echo -n "  CA cert path (empty=system CAs): "; read -r ca_path
 
             cat >> "${config_file}" << EOF
 
@@ -489,11 +489,11 @@ configure_server() {
     echo ""
 
     # Basic settings
-    read -rp "  Bind port [2333]: " server_port
+    echo -n "  Bind port [2333]: "; read -r server_port
     server_port="${server_port:-2333}"
 
     # IPv6 support
-    read -rp "  Bind on IPv6 too? (y/n) [n]: " use_ipv6
+    echo -n "  Bind on IPv6 too? (y/n) [n]: "; read -r use_ipv6
     if [[ "${use_ipv6}" =~ ^[Yy]$ ]]; then
         bind_addr="[::]:${server_port}"
     else
@@ -501,13 +501,13 @@ configure_server() {
     fi
 
     # Token
-    read -rp "  Default token (empty=auto-generate): " default_token
+    echo -n "  Default token (empty=auto-generate): "; read -r default_token
     if [[ -z "${default_token}" ]]; then
         default_token=$(generate_token)
         echo -e "  ${GREEN}Generated token:${NC} ${default_token}"
     fi
 
-    read -rp "  Heartbeat interval (seconds) [30]: " heartbeat
+    echo -n "  Heartbeat interval (seconds) [30]: "; read -r heartbeat
     heartbeat="${heartbeat:-30}"
 
     # Transport
@@ -558,7 +558,7 @@ add_services_server() {
 
     while [[ "${add_more}" =~ ^[Yy]$ ]]; do
         echo ""
-        read -rp "  Service name: " svc_name
+        echo -n "  Service name: "; read -r svc_name
         if [[ -z "${svc_name}" ]]; then
             print_error "Service name cannot be empty"
             continue
@@ -568,7 +568,7 @@ add_services_server() {
         echo -e "      ${GREEN}1)${NC} tcp ${DIM}(default)${NC}"
         echo -e "      ${GREEN}2)${NC} udp ${DIM}(games, VPN, DNS)${NC}"
         echo -e "      ${GREEN}3)${NC} http ${DIM}(web proxy)${NC}"
-        read -rp "    Type [1]: " svc_type_choice
+        echo -n "    Type [1]: "; read -r svc_type_choice
         case "${svc_type_choice:-1}" in
             1) svc_type="tcp" ;;
             2) svc_type="udp" ;;
@@ -576,16 +576,16 @@ add_services_server() {
             *) svc_type="tcp" ;;
         esac
 
-        read -rp "  Bind port: " svc_port
+        echo -n "  Bind port: "; read -r svc_port
         if [[ -z "${svc_port}" ]]; then
             print_error "Port cannot be empty"
             continue
         fi
 
-        read -rp "  Max mux streams [8]: " svc_mux
+        echo -n "  Max mux streams [8]: "; read -r svc_mux
         svc_mux="${svc_mux:-8}"
 
-        read -rp "  Custom token (empty=use default): " svc_token
+        echo -n "  Custom token (empty=use default): "; read -r svc_token
 
         cat >> "${config_file}" << EOF
 
@@ -601,7 +601,7 @@ EOF
 
         print_success "Service '${svc_name}' added (${svc_type} on port ${svc_port})"
         echo ""
-        read -rp "  Add another service? (y/n): " add_more
+        echo -n "  Add another service? (y/n): "; read -r add_more
     done
 }
 
@@ -615,27 +615,27 @@ configure_client() {
     echo ""
 
     # Server address
-    read -rp "  Server address (ip:port or [ipv6]:port): " remote_addr
+    echo -n "  Server address (ip:port or [ipv6]:port): "; read -r remote_addr
     if [[ -z "${remote_addr}" ]]; then
         print_error "Server address is required!"
         return 1
     fi
 
     # Token
-    read -rp "  Default token: " default_token
+    echo -n "  Default token: "; read -r default_token
     if [[ -z "${default_token}" ]]; then
         print_error "Token is required!"
         return 1
     fi
 
-    read -rp "  Retry interval (seconds) [3]: " retry
+    echo -n "  Retry interval (seconds) [3]: "; read -r retry
     retry="${retry:-3}"
 
-    read -rp "  Mux connections per service [4]: " mux_conn
+    echo -n "  Mux connections per service [4]: "; read -r mux_conn
     mux_conn="${mux_conn:-4}"
 
     # IPv6
-    read -rp "  Prefer IPv6? (y/n) [n]: " prefer_ipv6
+    echo -n "  Prefer IPv6? (y/n) [n]: "; read -r prefer_ipv6
     [[ "${prefer_ipv6}" =~ ^[Yy]$ ]] && prefer_ipv6="true" || prefer_ipv6="false"
 
     # Transport
@@ -664,18 +664,18 @@ EOF
 
     # HTTP proxy (optional)
     echo ""
-    read -rp "  Use HTTP/SOCKS5 proxy? (y/n) [n]: " use_proxy
+    echo -n "  Use HTTP/SOCKS5 proxy? (y/n) [n]: "; read -r use_proxy
     if [[ "${use_proxy}" =~ ^[Yy]$ ]]; then
-        read -rp "  Proxy URL (http://host:port or socks5://host:port): " proxy_url
+        echo -n "  Proxy URL (http://host:port or socks5://host:port): "; read -r proxy_url
         if [[ -n "${proxy_url}" ]]; then
             cat >> "${config_file}" << EOF
 
 [client.http_proxy]
 url = "${proxy_url}"
 EOF
-            read -rp "  Proxy username (empty=none): " proxy_user
+            echo -n "  Proxy username (empty=none): "; read -r proxy_user
             if [[ -n "${proxy_user}" ]]; then
-                read -rsp "  Proxy password: " proxy_pass
+                echo -n "  Proxy password: "; read -rs proxy_pass
                 echo ""
                 cat >> "${config_file}" << EOF
 username = "${proxy_user}"
@@ -706,7 +706,7 @@ add_services_client() {
 
     while [[ "${add_more}" =~ ^[Yy]$ ]]; do
         echo ""
-        read -rp "  Service name (must match server): " svc_name
+        echo -n "  Service name (must match server): "; read -r svc_name
         if [[ -z "${svc_name}" ]]; then
             print_error "Service name cannot be empty"
             continue
@@ -716,7 +716,7 @@ add_services_client() {
         echo -e "      ${GREEN}1)${NC} tcp ${DIM}(default)${NC}"
         echo -e "      ${GREEN}2)${NC} udp"
         echo -e "      ${GREEN}3)${NC} http"
-        read -rp "    Type [1]: " svc_type_choice
+        echo -n "    Type [1]: "; read -r svc_type_choice
         case "${svc_type_choice:-1}" in
             1) svc_type="tcp" ;;
             2) svc_type="udp" ;;
@@ -724,17 +724,17 @@ add_services_client() {
             *) svc_type="tcp" ;;
         esac
 
-        read -rp "  Local address (e.g., 127.0.0.1:22): " local_addr
+        echo -n "  Local address (e.g., 127.0.0.1:22): "; read -r local_addr
         if [[ -z "${local_addr}" ]]; then
             print_error "Local address is required"
             continue
         fi
 
-        read -rp "  Mux streams [4]: " svc_mux
+        echo -n "  Mux streams [4]: "; read -r svc_mux
         svc_mux="${svc_mux:-4}"
 
         # Load balancing
-        read -rp "  Enable load balancing? (y/n) [n]: " use_lb
+        echo -n "  Enable load balancing? (y/n) [n]: "; read -r use_lb
         local backends_config=""
         local lb_config=""
 
@@ -743,7 +743,7 @@ add_services_client() {
             echo -e "      ${GREEN}1)${NC} round_robin ${DIM}(default)${NC}"
             echo -e "      ${GREEN}2)${NC} random"
             echo -e "      ${GREEN}3)${NC} least_conn"
-            read -rp "    Strategy [1]: " lb_choice
+            echo -n "    Strategy [1]: "; read -r lb_choice
             case "${lb_choice:-1}" in
                 1) lb_strategy="round_robin" ;;
                 2) lb_strategy="random" ;;
@@ -751,14 +751,14 @@ add_services_client() {
                 *) lb_strategy="round_robin" ;;
             esac
 
-            read -rp "  Health check interval (0=disable) [10]: " hc_interval
+            echo -n "  Health check interval (0=disable) [10]: "; read -r hc_interval
             hc_interval="${hc_interval:-10}"
 
             echo "  Enter backend addresses (one per line, empty to finish):"
             local backends=()
             backends+=("${local_addr}")
             while true; do
-                read -rp "    Backend: " backend
+                echo -n "    Backend: "; read -r backend
                 [[ -z "${backend}" ]] && break
                 backends+=("${backend}")
             done
@@ -770,7 +770,7 @@ strategy = \"${lb_strategy}\"
 health_check_interval = ${hc_interval}"
         fi
 
-        read -rp "  Custom token (empty=use default): " svc_token
+        echo -n "  Custom token (empty=use default): "; read -r svc_token
 
         cat >> "${config_file}" << EOF
 
@@ -792,7 +792,7 @@ EOF
 
         print_success "Service '${svc_name}' added (${svc_type} -> ${local_addr})"
         echo ""
-        read -rp "  Add another service? (y/n): " add_more
+        echo -n "  Add another service? (y/n): "; read -r add_more
     done
 }
 
@@ -845,7 +845,7 @@ start_service() {
     echo -e "    ${GREEN}1)${NC} Server"
     echo -e "    ${GREEN}2)${NC} Client"
     echo -e "    ${GREEN}3)${NC} Both"
-    read -rp "  Choice: " choice
+    echo -n "  Choice: "; read -r choice
 
     case "${choice}" in
         1)
@@ -872,7 +872,7 @@ stop_service() {
     echo -e "    ${GREEN}1)${NC} Server"
     echo -e "    ${GREEN}2)${NC} Client"
     echo -e "    ${GREEN}3)${NC} Both"
-    read -rp "  Choice: " choice
+    echo -n "  Choice: "; read -r choice
 
     case "${choice}" in
         1) systemctl stop "${SERVICE_PREFIX}-server" 2>/dev/null && print_success "Server stopped" ;;
@@ -891,7 +891,7 @@ restart_service() {
     echo -e "    ${GREEN}1)${NC} Server"
     echo -e "    ${GREEN}2)${NC} Client"
     echo -e "    ${GREEN}3)${NC} Both"
-    read -rp "  Choice: " choice
+    echo -n "  Choice: "; read -r choice
 
     case "${choice}" in
         1) systemctl restart "${SERVICE_PREFIX}-server" && print_success "Server restarted" ;;
@@ -970,7 +970,7 @@ view_logs() {
     echo -e "    ${GREEN}2)${NC} Client logs"
     echo -e "    ${GREEN}3)${NC} Live server logs (follow)"
     echo -e "    ${GREEN}4)${NC} Live client logs (follow)"
-    read -rp "  Choice: " choice
+    echo -n "  Choice: "; read -r choice
 
     case "${choice}" in
         1) journalctl -u "${SERVICE_PREFIX}-server" --no-pager -n 50 ;;
@@ -986,7 +986,7 @@ view_config() {
     echo -e "  ${BOLD}View Configuration${NC}"
     echo -e "    ${GREEN}1)${NC} Server config"
     echo -e "    ${GREEN}2)${NC} Client config"
-    read -rp "  Choice: " choice
+    echo -n "  Choice: "; read -r choice
 
     case "${choice}" in
         1)
@@ -1126,7 +1126,7 @@ main_menu() {
         echo ""
         echo -e "    ${RED} 0)${NC} Exit"
         echo ""
-        read -rp "  Select option: " choice
+        echo -n "  Select option: "; read -r choice
 
         case "${choice}" in
             1)  full_install ;;
@@ -1152,7 +1152,7 @@ main_menu() {
         echo ""
         echo ""
         echo -e "  ${YELLOW}───── Press Enter to return to menu ─────${NC}"
-        read -rp "" _
+        echo -n ""; read -r _
     done
 }
 
