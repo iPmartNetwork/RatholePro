@@ -2,7 +2,7 @@
 
 **By iPmart Network (Ali Hassanzadeh)**
 
-> **RatholePro** — Next-generation high-performance reverse proxy tunnel with built-in multiplexing, multi-transport encryption, UDP forwarding, load balancing, P2P NAT traversal, and HTTP proxy support. Engineered for raw speed, zero-compromise security, and dead-simple deployment.
+> **RatholePro** — Next-generation high-performance reverse proxy tunnel built in Go with real yamux multiplexing, multi-transport encryption, auto-TLS, UDP forwarding, load balancing, P2P NAT traversal, and HTTP proxy. Single binary, zero config headache.
 
 [![GitHub Stars](https://img.shields.io/github/stars/iPmartNetwork/RatholePro?style=flat-square)](https://github.com/iPmartNetwork/RatholePro/stargazers)
 [![License](https://img.shields.io/github/license/iPmartNetwork/RatholePro?style=flat-square)](https://github.com/iPmartNetwork/RatholePro/blob/master/LICENSE)
@@ -14,56 +14,55 @@
 
 | Category | Features |
 |----------|----------|
-| **Transports** | TCP, TLS 1.3, Noise Protocol, WebSocket, WSS, QUIC |
+| **Core** | Real yamux multiplexing (single TCP, many streams) |
+| **Transports** | TCP, TLS (auto-cert!), Noise Protocol, WebSocket |
 | **Protocols** | TCP forwarding, UDP forwarding, HTTP/HTTPS proxy |
-| **Performance** | Multiplexing, Connection pooling, Async I/O (Tokio) |
-| **Security** | SHA-256 token auth, Noise encryption, TLS 1.3, Config validation |
-| **Networking** | IPv6 support, Load balancing, P2P NAT traversal (STUN) |
-| **Operations** | Auto reconnect, Systemd integration, Menu-driven installer |
+| **Security** | SHA-256 token auth, TLS 1.2+ (auto-generated cert), Noise encryption |
+| **Networking** | IPv6, Load balancing (round-robin/random/least-conn), P2P STUN |
+| **Operations** | Auto reconnect, Heartbeat, Systemd service, Menu-driven installer |
 
 ---
 
 ## Quick Install (Linux)
 
-One command — auto-detects architecture and downloads from [GitHub Releases](https://github.com/iPmartNetwork/RatholePro/releases):
-
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/iPmartNetwork/RatholePro/master/install.sh)
 ```
-
-Supported architectures: `x86_64`, `aarch64 (ARM64)`, `armv7`
 
 ---
 
 ## Manual Download
 
-Download the binary for your platform from [Releases](https://github.com/iPmartNetwork/RatholePro/releases):
+Download from [Releases](https://github.com/iPmartNetwork/RatholePro/releases/latest):
 
 | Platform | Architecture | File |
 |----------|-------------|------|
-| Linux | x86_64 (AMD/Intel) | `rathole-pro-x86_64-linux` |
-| Linux | aarch64 (ARM64) | `rathole-pro-aarch64-linux` |
-| Linux | armv7 (ARM32) | `rathole-pro-armv7-linux` |
-| Windows | x86_64 | `rathole-pro-x86_64-windows.exe` |
-| macOS | x86_64 | `rathole-pro-x86_64-macos` |
+| Linux | x86_64 (AMD/Intel) | `rathole-pro-linux-amd64` |
+| Linux | ARM64 (aarch64) | `rathole-pro-linux-arm64` |
+| Linux | ARMv7 (32-bit) | `rathole-pro-linux-armv7` |
+| Linux | MIPS64 | `rathole-pro-linux-mips64` |
+| Linux | MIPS | `rathole-pro-linux-mips` |
+| Windows | x86_64 | `rathole-pro-windows-amd64.exe` |
+| macOS | x86_64 (Intel) | `rathole-pro-darwin-amd64` |
+| macOS | ARM64 (Apple Silicon) | `rathole-pro-darwin-arm64` |
 
 ```bash
-# Example: download and install on x86_64 Linux
-wget https://github.com/iPmartNetwork/RatholePro/releases/latest/download/rathole-pro-x86_64-linux
-chmod +x rathole-pro-x86_64-linux
-sudo mv rathole-pro-x86_64-linux /usr/local/bin/rathole-pro
+wget https://github.com/iPmartNetwork/RatholePro/releases/latest/download/rathole-pro-linux-amd64
+chmod +x rathole-pro-linux-amd64
+sudo mv rathole-pro-linux-amd64 /usr/local/bin/rathole-pro
 ```
 
 ---
 
 ## Build from Source
 
+Requires Go 1.22+:
+
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 git clone https://github.com/iPmartNetwork/RatholePro.git
-cd RatholePro
-cargo build --release
-# Binary: target/release/rathole-pro
+cd RatholePro/go-core
+go build -ldflags="-s -w" -o rathole-pro .
+sudo mv rathole-pro /usr/local/bin/
 ```
 
 ---
@@ -71,17 +70,20 @@ cargo build --release
 ## Usage
 
 ```bash
-# Run as server
+# Server mode
 rathole-pro server.toml
 
-# Run as client
+# Client mode
 rathole-pro client.toml
 
-# Validate config without running
+# Validate config
 rathole-pro --validate server.toml
 
-# Generate Noise Protocol keypair
+# Generate Noise keypair
 rathole-pro --gen-key
+
+# Show version
+rathole-pro --version
 ```
 
 ---
@@ -90,29 +92,58 @@ rathole-pro --gen-key
 
 ### Basic TCP Tunnel
 
-**Server** (public IP):
+**Server** (public IP — Iran):
 ```toml
 [server]
 bind_addr = "0.0.0.0:2333"
 default_token = "my_secret_token"
+heartbeat_interval = 30
 
-[server.services.ssh]
-bind_addr = "0.0.0.0:5022"
+[server.services.web]
+bind_addr = "0.0.0.0:8080"
 ```
 
-**Client** (behind NAT):
+**Client** (behind NAT — Kharej):
 ```toml
 [client]
-remote_addr = "your-server.com:2333"
+remote_addr = "IRAN_IP:2333"
 default_token = "my_secret_token"
+retry_interval = 3
 mux_connections = 4
 
-[client.services.ssh]
-local_addr = "127.0.0.1:22"
+[client.services.web]
+local_addr = "127.0.0.1:8080"
 mux_streams = 8
 ```
 
-### TLS Encryption
+---
+
+### TLS with Auto-Cert (no domain needed!)
+
+**Server:**
+```toml
+[server.transport]
+type = "tls"
+
+[server.transport.tls]
+auto_cert = true
+```
+
+**Client:**
+```toml
+[client.transport]
+type = "tls"
+
+[client.transport.tls]
+# Nothing needed! Encryption active, no cert file required.
+```
+
+> Certificate is auto-generated on first run. No domain, no manual setup.
+
+---
+
+### TLS with Custom Cert
+
 ```toml
 [server.transport]
 type = "tls"
@@ -122,16 +153,32 @@ trusted_root = "/etc/certs/cert.pem"
 pkcs12 = "/etc/certs/key.pem"
 ```
 
+---
+
 ### Noise Protocol (no certificates!)
+
 ```toml
+# Server
 [server.transport]
 type = "noise"
 
 [server.transport.noise]
-local_private_key = "BASE64_SERVER_PRIVATE_KEY"
+local_private_key = "BASE64_PRIVATE_KEY"
+
+# Client
+[client.transport]
+type = "noise"
+
+[client.transport.noise]
+remote_public_key = "BASE64_PUBLIC_KEY"
 ```
 
+Generate keys: `rathole-pro --gen-key`
+
+---
+
 ### WebSocket (bypass firewalls)
+
 ```toml
 [server.transport]
 type = "ws"
@@ -140,17 +187,10 @@ type = "ws"
 path = "/tunnel"
 ```
 
-### QUIC (low latency, built-in TLS)
-```toml
-[server.transport]
-type = "quic"
-
-[server.transport.quic]
-cert = "/etc/certs/cert.pem"
-key = "/etc/certs/key.pem"
-```
+---
 
 ### UDP Forwarding (WireGuard, games, DNS)
+
 ```toml
 # Server
 [server.services.wireguard]
@@ -163,36 +203,42 @@ type = "udp"
 local_addr = "127.0.0.1:51820"
 ```
 
-### Load Balancing (multiple backends)
-```toml
-[client.services.web]
-local_addr = "127.0.0.1:8080"
-backends = ["127.0.0.1:8080", "127.0.0.1:8081", "127.0.0.1:8082"]
-
-[client.services.web.load_balance]
-strategy = "round_robin"
-health_check_interval = 10
-```
-
-### IPv6
-```toml
-[server]
-bind_addr = "[::]:2333"
-prefer_ipv6 = true
-```
-
 ---
 
 ## Architecture
 
 ```
                      Transport Layer
-              (TCP / TLS / Noise / WS / WSS / QUIC)
-                              │
-Visitor ──► [Server:5022] ──► │ ──► Mux Protocol ──► [Client] ──► [127.0.0.1:22]
-Visitor ──► [Server:5022] ──► │    (single connection)
-Visitor ──► [Server:8080] ──► │
-UDP pkt ──► [Server:51820] ─► │ ──► UDP-over-TCP ──► [Client] ──► [127.0.0.1:51820]
+              (TCP / TLS / Noise / WebSocket)
+                           │
+                      ┌────┴────┐
+                      │  yamux  │  ← single TCP connection, many streams
+                      └────┬────┘
+                           │
+Visitor ─► [Server:8080] ──┼──► stream 1 ──► [Client] ──► [127.0.0.1:8080]
+Visitor ─► [Server:8080] ──┼──► stream 2 ──► [Client] ──► [127.0.0.1:8080]
+Visitor ─► [Server:5022] ──┼──► stream 3 ──► [Client] ──► [127.0.0.1:22]
+UDP pkt ─► [Server:51820] ─┼──► stream 4 ──► [Client] ──► [127.0.0.1:51820]
+```
+
+---
+
+## Install Script Menu
+
+```
+╔═══════════════════════════════════════════════════════════╗
+║         Rathole Pro v0.4.0 (Go + Yamux)                  ║
+║  Transports: TCP │ TLS (auto-cert) │ Noise │ WebSocket  ║
+║  Developer: iPmart Network (Ali Hassanzadeh)             ║
+╚═══════════════════════════════════════════════════════════╝
+
+  1) Install Binary
+  2) Configure IRAN Server (users connect here)
+  3) Configure KHAREJ Server (services run here)
+  4) Start / 5) Stop / 6) Restart
+  7) Status / 8) Logs / 9) View Config
+ 10) Update / 11) Uninstall
+  0) Exit
 ```
 
 ---
@@ -201,43 +247,17 @@ UDP pkt ──► [Server:51820] ─► │ ──► UDP-over-TCP ──► [Cl
 
 | Feature | rathole | frp | Backhaul | **RatholePro** |
 |---------|---------|-----|----------|----------------|
-| Multiplexing | ✗ | ✗ | ✓ | ✓ |
-| TLS | ✓ | ✓ | ✗ | ✓ |
+| Yamux Multiplexing | ✗ | ✗ | ✓ | ✓ |
+| TLS Auto-Cert | ✗ | ✗ | ✗ | ✓ |
 | Noise Protocol | ✓ | ✗ | ✗ | ✓ |
 | WebSocket | ✓ | ✗ | ✓ | ✓ |
-| QUIC | ✗ | ✗ | ✗ | ✓ |
 | UDP Forward | ✓ | ✓ | ✓ | ✓ |
 | HTTP Proxy | ✗ | ✓ | ✗ | ✓ |
 | Load Balance | ✗ | ✓ | ✗ | ✓ |
 | P2P/STUN | ✗ | ✗ | ✗ | ✓ |
-| Config Validation | ✗ | ✗ | ✗ | ✓ |
 | IPv6 | Partial | ✓ | ✗ | ✓ |
 | Install Script | ✗ | ✗ | ✗ | ✓ |
-
----
-
-## Install Script Menu
-
-```
-╔═══════════════════════════════════════════════════════════╗
-║              Rathole Pro v0.1.0                          ║
-║     High-Performance Tunnel + Multi-Protocol + Mux      ║
-║  Developer: iPmart Network (Ali Hassanzadeh)            ║
-╚═══════════════════════════════════════════════════════════╝
-
-  1) Install Rathole Pro
-  2) Configure Server
-  3) Configure Client
-  4) Start Service
-  5) Stop Service
-  6) Restart Service
-  7) View Status
-  8) View Logs
-  9) View Config
- 10) Update Binary
- 11) Uninstall
-  0) Exit
-```
+| Single Binary | ✓ | ✓ | ✓ | ✓ |
 
 ---
 
