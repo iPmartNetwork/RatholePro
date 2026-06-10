@@ -573,30 +573,34 @@ EOF
 
     echo ""
     print_divider
-    echo -e "  ${BOLD}Add Ports (which ports should users connect to on Iran?)${NC}"
-    echo -e "  ${DIM}Example: if your panel is on port 2083, add port 2083 here.${NC}"
-    echo -e "  ${DIM}Users will connect to IRAN_IP:2083 and traffic goes to Kharej.${NC}"
+    echo -e "  ${BOLD}Ports to expose (users connect to these on Iran)${NC}"
+    echo -e "  ${DIM}Enter ports separated by comma. Example: 2083,443,8080${NC}"
+    echo -e "  ${DIM}Users will connect to IRAN_IP:PORT and traffic goes to Kharej.${NC}"
     print_divider
+    echo ""
+    echo -n "  Ports (comma separated): "; read -r input_ports
 
-    local add_more="y"
-    while [[ "${add_more}" =~ ^[Yy]$ ]]; do
-        echo ""
-        echo -n "  Service name (any name, e.g., panel): "; read -r svc_name
-        if [[ -z "${svc_name}" ]]; then continue; fi
+    if [[ -z "${input_ports}" ]]; then
+        print_error "At least one port is required!"
+        return 1
+    fi
 
-        echo -n "  Port number (e.g., 2083): "; read -r svc_port
-        if [[ -z "${svc_port}" ]]; then continue; fi
+    # Parse ports
+    input_ports=$(echo "${input_ports}" | tr -d ' ')
+    IFS=',' read -ra ports <<< "${input_ports}"
 
-        cat >> "${config_file}" << EOF
+    for port in "${ports[@]}"; do
+        if [[ "${port}" =~ ^[0-9]+$ ]] && [ "${port}" -gt 0 ] && [ "${port}" -le 65535 ]; then
+            cat >> "${config_file}" << EOF
 
-[server.services.${svc_name}]
+[server.services.${port}]
 type = "tcp"
-bind_addr = "0.0.0.0:${svc_port}"
-max_mux_streams = 8
+bind_addr = "0.0.0.0:${port}"
 EOF
-        print_success "Port ${svc_port} added as '${svc_name}'"
-        echo ""
-        echo -n "  Add another port? (y/n): "; read -r add_more
+            print_success "Port ${port} added"
+        else
+            print_error "Invalid port: ${port}"
+        fi
     done
 
     echo ""
@@ -606,11 +610,16 @@ EOF
     echo -e "  ${YELLOW}  COPY THIS FOR KHAREJ SETUP:${NC}"
     echo -e "  ${YELLOW}  Token:       ${default_token}${NC}"
     echo -e "  ${YELLOW}  Tunnel Port: ${server_port}${NC}"
-    echo -e "  ${YELLOW}  Service(s):  check config above${NC}"
     echo -e "  ${YELLOW}════════════════════════════════════════════${NC}"
     echo ""
 
     create_systemd_service "server"
+
+    # Auto-start service
+    echo ""
+    systemctl start "${SERVICE_PREFIX}-server" 2>/dev/null && \
+        print_success "Server service started!" || \
+        print_error "Failed to start server service"
 }
 
 add_services_server() {
@@ -680,13 +689,22 @@ configure_kharej() {
     print_divider
     echo ""
 
-    echo -e "  ${CYAN}Iran server address (IP:PORT of your IRAN server):${NC}"
-    echo -e "  ${DIM}  Use the tunnel port you set on Iran (e.g., 1.2.3.4:2333)${NC}"
-    echo -n "  Iran address: "; read -r remote_addr
-    if [[ -z "${remote_addr}" ]]; then
-        print_error "Iran server address is required!"
+    echo -e "  ${CYAN}Iran server IP address:${NC}"
+    echo -n "  Iran IP: "; read -r iran_ip
+    if [[ -z "${iran_ip}" ]]; then
+        print_error "Iran IP is required!"
         return 1
     fi
+
+    echo ""
+    echo -e "  ${CYAN}Tunnel port (the port you set on Iran server):${NC}"
+    echo -n "  Tunnel port: "; read -r tunnel_port
+    if [[ -z "${tunnel_port}" ]]; then
+        print_error "Tunnel port is required!"
+        return 1
+    fi
+
+    local remote_addr="${iran_ip}:${tunnel_port}"
 
     echo ""
     echo -e "  ${CYAN}Token (must be SAME as Iran server):${NC}"
@@ -706,42 +724,42 @@ configure_kharej() {
 remote_addr = "${remote_addr}"
 default_token = "${default_token}"
 heartbeat_timeout = 40
-retry_interval = 3
+retry_interval = 1
 mux_connections = 4
 EOF
     configure_transport_client "${config_file}" "${remote_addr}"
 
     echo ""
     print_divider
-    echo -e "  ${BOLD}Add Services (local ports to forward through tunnel)${NC}"
-    echo -e "  ${DIM}Service name MUST be the same name you used on Iran!${NC}"
-    echo -e "  ${DIM}Local address = where your panel/service runs on THIS machine.${NC}"
-    echo -e "  ${DIM}Example: if panel runs on port 2083 → local address: 127.0.0.1:2083${NC}"
+    echo -e "  ${BOLD}Ports to forward (your services on this machine)${NC}"
+    echo -e "  ${DIM}Enter ports separated by comma. Example: 2083,443,8080${NC}"
+    echo -e "  ${DIM}These ports will be forwarded through the tunnel.${NC}"
     print_divider
+    echo ""
+    echo -n "  Ports (comma separated): "; read -r input_ports
 
-    local add_more="y"
-    while [[ "${add_more}" =~ ^[Yy]$ ]]; do
-        echo ""
-        echo -n "  Service name (SAME as Iran, e.g., panel): "; read -r svc_name
-        if [[ -z "${svc_name}" ]]; then continue; fi
+    if [[ -z "${input_ports}" ]]; then
+        print_error "At least one port is required!"
+        return 1
+    fi
 
-        echo -e "  ${DIM}  Where does your service run on this machine?${NC}"
-        echo -n "  Local address (e.g., 127.0.0.1:2083): "; read -r local_addr
-        if [[ -z "${local_addr}" ]]; then
-            print_error "Local address is required!"
-            continue
-        fi
+    # Parse ports
+    input_ports=$(echo "${input_ports}" | tr -d ' ')
+    IFS=',' read -ra ports <<< "${input_ports}"
 
-        cat >> "${config_file}" << EOF
+    for port in "${ports[@]}"; do
+        if [[ "${port}" =~ ^[0-9]+$ ]] && [ "${port}" -gt 0 ] && [ "${port}" -le 65535 ]; then
+            cat >> "${config_file}" << EOF
 
-[client.services.${svc_name}]
+[client.services.${port}]
 type = "tcp"
-local_addr = "${local_addr}"
+local_addr = "127.0.0.1:${port}"
 mux_streams = 4
 EOF
-        print_success "Service '${svc_name}' → ${local_addr}"
-        echo ""
-        echo -n "  Add another service? (y/n): "; read -r add_more
+            print_success "Port ${port} added (127.0.0.1:${port})"
+        else
+            print_error "Invalid port: ${port}"
+        fi
     done
 
     echo ""
@@ -749,6 +767,12 @@ EOF
     echo ""
 
     create_systemd_service "client"
+
+    # Auto-start service
+    echo ""
+    systemctl start "${SERVICE_PREFIX}-client" 2>/dev/null && \
+        print_success "Client service started!" || \
+        print_error "Failed to start client service"
 }
 
 add_services_client() {
