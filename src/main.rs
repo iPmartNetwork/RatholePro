@@ -16,8 +16,8 @@ use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
 #[command(name = "rathole-pro")]
-#[command(version = "0.3.0")]
-#[command(about = "RatholePro v0.3.0 — Full-featured tunnel: TCP/UDP/WS + Mux + LB + P2P\nDeveloper: iPmart Network (Ali Hassanzadeh)")]
+#[command(version = "0.4.0")]
+#[command(about = "RatholePro v0.4.0 — Transparent TCP/UDP tunnel\nDeveloper: iPmart Network (Ali Hassanzadeh)")]
 struct Cli {
     #[arg(value_name = "CONFIG")]
     config: Option<String>,
