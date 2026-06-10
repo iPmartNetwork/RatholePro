@@ -1,3 +1,5 @@
+#![allow(unused_imports, dead_code, unused_variables, unused_mut)]
+
 mod config;
 mod server;
 mod client;
@@ -5,8 +7,11 @@ mod mux;
 mod protocol;
 mod transport;
 mod udp;
+#[allow(dead_code)]
 mod http_proxy;
+#[allow(dead_code)]
 mod load_balancer;
+#[allow(dead_code)]
 mod p2p;
 
 use clap::Parser;

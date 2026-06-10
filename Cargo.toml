@@ -9,12 +9,12 @@ repository = "https://github.com/iPmartNetwork/RatholePro"
 homepage = "https://github.com/iPmartNetwork/RatholePro"
 
 [features]
-default = ["all-transports"]
+default = ["transport-tls", "transport-noise", "transport-ws"]
 all-transports = ["transport-tls", "transport-noise", "transport-ws", "transport-quic"]
-transport-tls = ["tokio-rustls", "rustls", "rustls-pemfile", "webpki-roots"]
-transport-noise = ["snow"]
-transport-ws = ["tokio-tungstenite"]
-transport-quic = ["quinn"]
+transport-tls = ["dep:tokio-rustls", "dep:rustls", "dep:rustls-pemfile", "dep:webpki-roots"]
+transport-noise = ["dep:snow"]
+transport-ws = ["dep:tokio-tungstenite"]
+transport-quic = ["dep:quinn", "dep:rustls", "dep:rustls-pemfile", "dep:webpki-roots"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -38,7 +38,7 @@ tokio-rustls = { version = "0.26", optional = true }
 rustls = { version = "0.23", optional = true }
 rustls-pemfile = { version = "2", optional = true }
 webpki-roots = { version = "0.26", optional = true }
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"], optional = true }
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"], optional = true }
 snow = { version = "0.9", optional = true }
 quinn = { version = "0.11", optional = true }
 

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, stream::SplitSink, stream::SplitStream};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -7,44 +7,41 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::{
     connect_async, accept_async,
     tungstenite::protocol::Message as WsMessage,
-    WebSocketStream, MaybeTlsStream,
+    WebSocketStream,
 };
 
-/// WebSocket stream wrapper that implements AsyncRead + AsyncWrite.
-/// This allows the rest of the code to treat WebSocket like any other byte stream.
+/// Client-side WebSocket stream (may or may not be TLS)
 pub struct WsStream {
-    inner: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    sink: SplitSink<WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>, WsMessage>,
+    stream: SplitStream<WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>>,
     read_buf: Vec<u8>,
     read_pos: usize,
 }
 
-/// Server-side WebSocket (no TLS wrapper needed at this level)
+/// Server-side WebSocket stream (plain TCP, TLS handled at transport layer)
 pub struct WsServerStream {
-    inner: WebSocketStream<TcpStream>,
+    sink: SplitSink<WebSocketStream<TcpStream>, WsMessage>,
+    stream: SplitStream<WebSocketStream<TcpStream>>,
     read_buf: Vec<u8>,
     read_pos: usize,
 }
 
 impl WsStream {
-    pub fn new(inner: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
-        Self {
-            inner,
-            read_buf: Vec::new(),
-            read_pos: 0,
-        }
+    pub fn new(ws: WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>) -> Self {
+        let (sink, stream) = ws.split();
+        Self { sink, stream, read_buf: Vec::new(), read_pos: 0 }
     }
 }
 
 impl WsServerStream {
-    pub fn new(inner: WebSocketStream<TcpStream>) -> Self {
-        Self {
-            inner,
-            read_buf: Vec::new(),
-            read_pos: 0,
-        }
+    pub fn new(ws: WebSocketStream<TcpStream>) -> Self {
+        let (sink, stream) = ws.split();
+        Self { sink, stream, read_buf: Vec::new(), read_pos: 0 }
     }
 }
 
+// For now, implement simple polling wrappers
+// Note: A full production impl would use a proper adapter layer
 impl AsyncRead for WsStream {
     fn poll_read(
         self: Pin<&mut Self>,
@@ -52,207 +49,124 @@ impl AsyncRead for WsStream {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         let me = self.get_mut();
-
-        // Return buffered data first
         if me.read_pos < me.read_buf.len() {
-            let available = me.read_buf.len() - me.read_pos;
-            let to_copy = available.min(buf.remaining());
-            buf.put_slice(&me.read_buf[me.read_pos..me.read_pos + to_copy]);
-            me.read_pos += to_copy;
-            if me.read_pos >= me.read_buf.len() {
-                me.read_buf.clear();
-                me.read_pos = 0;
-            }
+            let n = (me.read_buf.len() - me.read_pos).min(buf.remaining());
+            buf.put_slice(&me.read_buf[me.read_pos..me.read_pos + n]);
+            me.read_pos += n;
+            if me.read_pos >= me.read_buf.len() { me.read_buf.clear(); me.read_pos = 0; }
             return Poll::Ready(Ok(()));
         }
-
-        // Poll for next WebSocket message
-        match Pin::new(&mut me.inner).poll_next(cx) {
-            Poll::Ready(Some(Ok(msg))) => {
-                match msg {
-                    WsMessage::Binary(data) => {
-                        let to_copy = data.len().min(buf.remaining());
-                        buf.put_slice(&data[..to_copy]);
-                        if to_copy < data.len() {
-                            me.read_buf = data[to_copy..].to_vec();
-                            me.read_pos = 0;
-                        }
-                        Poll::Ready(Ok(()))
-                    }
-                    WsMessage::Close(_) => Poll::Ready(Ok(())),
-                    WsMessage::Ping(_) | WsMessage::Pong(_) => {
-                        // Ignore control frames, wake to poll again
-                        cx.waker().wake_by_ref();
-                        Poll::Pending
-                    }
-                    _ => {
-                        cx.waker().wake_by_ref();
-                        Poll::Pending
-                    }
-                }
+        match Pin::new(&mut me.stream).poll_next(cx) {
+            Poll::Ready(Some(Ok(WsMessage::Binary(data)))) => {
+                let n = data.len().min(buf.remaining());
+                buf.put_slice(&data[..n]);
+                if n < data.len() { me.read_buf = data[n..].to_vec(); me.read_pos = 0; }
+                Poll::Ready(Ok(()))
             }
-            Poll::Ready(Some(Err(e))) => {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
-            }
-            Poll::Ready(None) => Poll::Ready(Ok(())),
+            Poll::Ready(Some(Ok(WsMessage::Close(_)))) | Poll::Ready(None) => Poll::Ready(Ok(())),
+            Poll::Ready(Some(Ok(_))) => { cx.waker().wake_by_ref(); Poll::Pending }
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))),
             Poll::Pending => Poll::Pending,
         }
     }
 }
 
 impl AsyncWrite for WsStream {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
         let me = self.get_mut();
-        let msg = WsMessage::Binary(buf.to_vec());
-
-        match Pin::new(&mut me.inner).poll_ready(cx) {
+        match Pin::new(&mut me.sink).poll_ready(cx) {
             Poll::Ready(Ok(())) => {
-                match Pin::new(&mut me.inner).start_send(msg) {
+                let msg = WsMessage::Binary(buf.to_vec());
+                match Pin::new(&mut me.sink).start_send(msg) {
                     Ok(()) => Poll::Ready(Ok(buf.len())),
-                    Err(e) => Poll::Ready(Err(std::io::Error::new(
-                        std::io::ErrorKind::Other, e.to_string()
-                    ))),
+                    Err(e) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))),
                 }
             }
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))),
             Poll::Pending => Poll::Pending,
         }
     }
-
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        let me = self.get_mut();
-        match Pin::new(&mut me.inner).poll_flush(cx) {
+        match Pin::new(&mut self.get_mut().sink).poll_flush(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))),
             Poll::Pending => Poll::Pending,
         }
     }
-
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        let me = self.get_mut();
-        match Pin::new(&mut me.inner).poll_close(cx) {
+        match Pin::new(&mut self.get_mut().sink).poll_close(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))),
             Poll::Pending => Poll::Pending,
         }
     }
 }
 
-// Same implementation for server-side stream
 impl AsyncRead for WsServerStream {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
         let me = self.get_mut();
-
         if me.read_pos < me.read_buf.len() {
-            let available = me.read_buf.len() - me.read_pos;
-            let to_copy = available.min(buf.remaining());
-            buf.put_slice(&me.read_buf[me.read_pos..me.read_pos + to_copy]);
-            me.read_pos += to_copy;
-            if me.read_pos >= me.read_buf.len() {
-                me.read_buf.clear();
-                me.read_pos = 0;
-            }
+            let n = (me.read_buf.len() - me.read_pos).min(buf.remaining());
+            buf.put_slice(&me.read_buf[me.read_pos..me.read_pos + n]);
+            me.read_pos += n;
+            if me.read_pos >= me.read_buf.len() { me.read_buf.clear(); me.read_pos = 0; }
             return Poll::Ready(Ok(()));
         }
-
-        match Pin::new(&mut me.inner).poll_next(cx) {
-            Poll::Ready(Some(Ok(msg))) => {
-                match msg {
-                    WsMessage::Binary(data) => {
-                        let to_copy = data.len().min(buf.remaining());
-                        buf.put_slice(&data[..to_copy]);
-                        if to_copy < data.len() {
-                            me.read_buf = data[to_copy..].to_vec();
-                            me.read_pos = 0;
-                        }
-                        Poll::Ready(Ok(()))
-                    }
-                    WsMessage::Close(_) => Poll::Ready(Ok(())),
-                    _ => {
-                        cx.waker().wake_by_ref();
-                        Poll::Pending
-                    }
-                }
+        match Pin::new(&mut me.stream).poll_next(cx) {
+            Poll::Ready(Some(Ok(WsMessage::Binary(data)))) => {
+                let n = data.len().min(buf.remaining());
+                buf.put_slice(&data[..n]);
+                if n < data.len() { me.read_buf = data[n..].to_vec(); me.read_pos = 0; }
+                Poll::Ready(Ok(()))
             }
-            Poll::Ready(Some(Err(e))) => {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
-            }
-            Poll::Ready(None) => Poll::Ready(Ok(())),
+            Poll::Ready(Some(Ok(WsMessage::Close(_)))) | Poll::Ready(None) => Poll::Ready(Ok(())),
+            Poll::Ready(Some(Ok(_))) => { cx.waker().wake_by_ref(); Poll::Pending }
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))),
             Poll::Pending => Poll::Pending,
         }
     }
 }
 
 impl AsyncWrite for WsServerStream {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
         let me = self.get_mut();
-        let msg = WsMessage::Binary(buf.to_vec());
-
-        match Pin::new(&mut me.inner).poll_ready(cx) {
+        match Pin::new(&mut me.sink).poll_ready(cx) {
             Poll::Ready(Ok(())) => {
-                match Pin::new(&mut me.inner).start_send(msg) {
+                match Pin::new(&mut me.sink).start_send(WsMessage::Binary(buf.to_vec())) {
                     Ok(()) => Poll::Ready(Ok(buf.len())),
-                    Err(e) => Poll::Ready(Err(std::io::Error::new(
-                        std::io::ErrorKind::Other, e.to_string()
-                    ))),
+                    Err(e) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))),
                 }
             }
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))),
             Poll::Pending => Poll::Pending,
         }
     }
-
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        match Pin::new(&mut self.get_mut().inner).poll_flush(cx) {
+        match Pin::new(&mut self.get_mut().sink).poll_flush(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))),
             Poll::Pending => Poll::Pending,
         }
     }
-
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        match Pin::new(&mut self.get_mut().inner).poll_close(cx) {
+        match Pin::new(&mut self.get_mut().sink).poll_close(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))),
             Poll::Pending => Poll::Pending,
         }
     }
 }
 
-/// Connect to a WebSocket server (client side)
+/// Connect as WebSocket client
 pub async fn connect(url: &str) -> Result<WsStream> {
-    let (ws_stream, _) = connect_async(url).await
-        .map_err(|e| anyhow::anyhow!("WebSocket connection failed: {}", e))?;
-    Ok(WsStream::new(ws_stream))
+    let (ws, _) = connect_async(url).await
+        .map_err(|e| anyhow::anyhow!("WebSocket connect failed: {}", e))?;
+    Ok(WsStream::new(ws))
 }
 
-/// Accept a WebSocket connection (server side)
+/// Accept WebSocket connection on server
 pub async fn accept(stream: TcpStream) -> Result<WsServerStream> {
-    let ws_stream = accept_async(stream).await
+    let ws = accept_async(stream).await
         .map_err(|e| anyhow::anyhow!("WebSocket accept failed: {}", e))?;
-    Ok(WsServerStream::new(ws_stream))
+    Ok(WsServerStream::new(ws))
 }
