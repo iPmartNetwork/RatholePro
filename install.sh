@@ -8,6 +8,15 @@
 # Version: 0.3.0
 # ═══════════════════════════════════════════════════════════════
 
+# Auto-download and re-exec if running from pipe (bash <(curl ...))
+if [[ ! -t 0 ]] && [[ -z "${RATHOLE_REEXEC:-}" ]]; then
+    tmp="/tmp/rathole-pro-install.sh"
+    curl -fsSL -o "$tmp" "https://raw.githubusercontent.com/iPmartNetwork/RatholePro/master/install.sh" 2>/dev/null || \
+    wget -q -O "$tmp" "https://raw.githubusercontent.com/iPmartNetwork/RatholePro/master/install.sh" 2>/dev/null
+    export RATHOLE_REEXEC=1
+    exec bash "$tmp"
+fi
+
 set -eo pipefail
 
 # ─── Colors ────────────────────────────────────────────────────
@@ -1058,11 +1067,6 @@ update_binary() {
 # ─── Main Menu ─────────────────────────────────────────────────
 
 main_menu() {
-    # Redirect stdin from tty for interactive use when piped
-    if [[ ! -t 0 ]]; then
-        exec < /dev/tty
-    fi
-
     while true; do
         print_banner
         echo -e "  ${BOLD}Main Menu${NC}"
