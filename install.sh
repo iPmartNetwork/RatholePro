@@ -1148,7 +1148,9 @@ main_menu() {
         esac
 
         echo ""
-        read -rp "  Press Enter to continue..." _
+        echo ""
+        echo -e "  ${YELLOW}───── Press Enter to return to menu ─────${NC}"
+        read -rp "" _
     done
 }
 
