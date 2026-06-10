@@ -1,0 +1,89 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARY_NAME: rathole-pro
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: rathole-pro-x86_64-linux
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: rathole-pro-aarch64-linux
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: rathole-pro-x86_64-windows.exe
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: rathole-pro-x86_64-macos
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Rename binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} ${{ matrix.name }}
+          chmod +x ${{ matrix.name }}
+
+      - name: Rename binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe ${{ matrix.name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            rathole-pro-x86_64-linux/rathole-pro-x86_64-linux
+            rathole-pro-aarch64-linux/rathole-pro-aarch64-linux
+            rathole-pro-x86_64-windows.exe/rathole-pro-x86_64-windows.exe
+            rathole-pro-x86_64-macos/rathole-pro-x86_64-macos
+          generate_release_notes: true
