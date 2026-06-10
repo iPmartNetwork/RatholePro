@@ -5,42 +5,54 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            name: rathole-pro-x86_64-linux
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            name: rathole-pro-x86_64-windows.exe
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            name: rathole-pro-x86_64-macos
+          - goos: linux
+            goarch: amd64
+            name: rathole-pro-linux-amd64
+          - goos: linux
+            goarch: arm64
+            name: rathole-pro-linux-arm64
+          - goos: linux
+            goarch: arm
+            goarm: "7"
+            name: rathole-pro-linux-armv7
+          - goos: linux
+            goarch: mips64
+            name: rathole-pro-linux-mips64
+          - goos: linux
+            goarch: mips
+            name: rathole-pro-linux-mips
+          - goos: windows
+            goarch: amd64
+            name: rathole-pro-windows-amd64.exe
+          - goos: darwin
+            goarch: amd64
+            name: rathole-pro-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            name: rathole-pro-darwin-arm64
 
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-go@v5
         with:
-          targets: ${{ matrix.target }}
+          go-version: '1.22'
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Package (Unix)
-        if: runner.os != 'Windows'
-        run: cp target/${{ matrix.target }}/release/rathole-pro ${{ matrix.name }} && chmod +x ${{ matrix.name }}
-
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        run: cp target/${{ matrix.target }}/release/rathole-pro.exe ${{ matrix.name }}
+        working-directory: go-core
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm || '' }}
+          CGO_ENABLED: "0"
+        run: go build -ldflags="-s -w" -o ../${{ matrix.name }} .
 
       - uses: actions/upload-artifact@v4
         with:
@@ -57,23 +69,22 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+
       - run: mkdir release && find artifacts -type f -exec cp {} release/ \;
+
       - uses: softprops/action-gh-release@v2
         with:
           name: "RatholePro ${{ github.ref_name }}"
           body: |
-            ## RatholePro ${{ github.ref_name }}
+            ## RatholePro ${{ github.ref_name }} (Go + Yamux)
             **Developer:** iPmart Network (Ali Hassanzadeh)
             
             ### Features
-            - TCP + UDP forwarding with multiplexing
-            - WebSocket transport (firewall bypass)
-            - Load Balancing (round_robin, random, least_conn)
-            - HTTP/HTTPS Proxy (CONNECT tunnel)
-            - P2P NAT traversal (STUN/hole punch)
-            - IPv6 support
-            - `--gen-key` keypair generator
-            - `--validate` config checker
+            - Real yamux multiplexing (single TCP, many streams)
+            - Transport: TCP, TLS (auto-cert), Noise, WebSocket (RFC 6455)
+            - TCP + UDP forwarding
+            - Load Balancing, HTTP Proxy, P2P STUN
+            - Heartbeat + auto-reconnect
             
             ### Install
             ```bash
