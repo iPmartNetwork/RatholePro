@@ -10,6 +10,9 @@
 
 set -eo pipefail
 
+# Ensure interactive input works even when piped (curl | bash)
+exec < /dev/tty 2>/dev/null || true
+
 # ─── Colors ────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
