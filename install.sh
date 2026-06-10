@@ -27,7 +27,7 @@ readonly CONFIG_DIR="/etc/rathole-pro"
 readonly LOG_DIR="/var/log/rathole-pro"
 readonly BINARY_NAME="rathole-pro"
 readonly GITHUB_REPO="iPmartNetwork/RatholePro"
-readonly VERSION="0.1.0"
+readonly APP_VERSION="0.3.0"
 readonly SERVICE_PREFIX="rathole-pro"
 readonly AUTHOR="iPmart Network (Ali Hassanzadeh)"
 
@@ -38,7 +38,7 @@ print_banner() {
     echo -e "${CYAN}"
     echo "╔═══════════════════════════════════════════════════════════╗"
     echo "║                                                           ║"
-    echo "║              Rathole Pro v${VERSION}                        ║"
+    echo "║              Rathole Pro v${APP_VERSION}                        ║"
     echo "║     High-Performance Tunnel + Multi-Protocol + Mux        ║"
     echo "║                                                           ║"
     echo "║  Transports: TCP │ TLS │ Noise │ WS │ WSS │ QUIC         ║"
@@ -73,11 +73,12 @@ check_root() {
 
 detect_os() {
     if [[ -f /etc/os-release ]]; then
-        # shellcheck source=/dev/null
-        source /etc/os-release
-        OS="${ID}"
-        OS_VERSION="${VERSION_ID:-unknown}"
-        OS_NAME="${PRETTY_NAME:-$ID}"
+        OS=$(grep -m1 '^ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
+        OS_VERSION=$(grep -m1 '^VERSION_ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
+        OS_NAME=$(grep -m1 '^PRETTY_NAME=' /etc/os-release | cut -d= -f2 | tr -d '"')
+        OS="${OS:-linux}"
+        OS_VERSION="${OS_VERSION:-unknown}"
+        OS_NAME="${OS_NAME:-${OS}}"
     elif [[ -f /etc/redhat-release ]]; then
         OS="centos"
         OS_NAME=$(cat /etc/redhat-release)
@@ -171,7 +172,7 @@ download_binary() {
     esac
 
     # Try to get latest release version from GitHub API
-    local latest_version="${VERSION}"
+    local latest_version="${APP_VERSION}"
     if command -v curl &>/dev/null && command -v jq &>/dev/null; then
         local api_response
         api_response=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null)
@@ -1064,9 +1065,9 @@ update_binary() {
         current_version=$(${RATHOLE_PRO_DIR}/${BINARY_NAME} --version 2>/dev/null | awk '{print $NF}' || echo "unknown")
     fi
     print_info "Current version: ${current_version}"
-    print_info "Latest version: ${VERSION}"
+    print_info "Latest version: ${APP_VERSION}"
 
-    if ! confirm_action "Download and install v${VERSION}?"; then
+    if ! confirm_action "Download and install v${APP_VERSION}?"; then
         return
     fi
 
