@@ -476,6 +476,49 @@ EOF
     esac
 }
 
+# ─── Systemd Service ───────────────────────────────────────────
+
+create_systemd_service() {
+    local mode="$1"
+    local config_file="${CONFIG_DIR}/${mode}.toml"
+    local service_name="${SERVICE_PREFIX}-${mode}"
+
+    cat > "/etc/systemd/system/${service_name}.service" << EOF
+[Unit]
+Description=Rathole Pro Tunnel (${mode})
+Documentation=https://github.com/iPmartNetwork/RatholePro
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=${RATHOLE_PRO_DIR}/${BINARY_NAME} ${config_file}
+Restart=always
+RestartSec=5
+LimitNOFILE=1048576
+LimitNPROC=512
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=${service_name}
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=${LOG_DIR}
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable "${service_name}" >/dev/null 2>&1
+    print_success "Systemd service created: ${service_name}"
+    print_info "Start with: systemctl start ${service_name}"
+}
+
 # ─── Server Configuration ──────────────────────────────────────
 
 configure_server() {
@@ -746,47 +789,7 @@ EOF
 }
 
 # ─── Systemd Service Management ────────────────────────────────
-
-create_systemd_service() {
-    local mode="$1"
-    local config_file="${CONFIG_DIR}/${mode}.toml"
-    local service_name="${SERVICE_PREFIX}-${mode}"
-
-    cat > "/etc/systemd/system/${service_name}.service" << EOF
-[Unit]
-Description=Rathole Pro Tunnel (${mode})
-Documentation=https://github.com/iPmartNetwork/RatholePro
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=root
-ExecStart=${RATHOLE_PRO_DIR}/${BINARY_NAME} ${config_file}
-Restart=always
-RestartSec=5
-LimitNOFILE=1048576
-LimitNPROC=512
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=${service_name}
-
-# Security hardening
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=${LOG_DIR}
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    systemctl daemon-reload
-    systemctl enable "${service_name}" >/dev/null 2>&1
-    print_success "Systemd service created: ${service_name}"
-    print_info "Start with: systemctl start ${service_name}"
-}
+# ─── Systemd Service Management ────────────────────────────────
 
 start_service() {
     echo ""
