@@ -1,138 +1,147 @@
 use crate::config::Config;
-use crate::mux::{self, Multiplexer};
 use crate::protocol::{self, AuthResponse, Message, MessageCodec};
 use anyhow::Result;
 use futures::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 use tokio_util::codec::Framed;
 use uuid::Uuid;
 
+/// Server: listens for clients and visitors.
+/// For each visitor on service port, picks an idle client data channel
+/// and does transparent TCP relay (no framing, no mux).
 pub async fn run(config: Config) -> Result<()> {
     let sc = config.server.ok_or_else(|| anyhow::anyhow!("No [server]"))?;
-    let listener = TcpListener::bind(&sc.bind_addr).await?;
-    tracing::info!("Server on {}", sc.bind_addr);
+    let control_listener = TcpListener::bind(&sc.bind_addr).await?;
+    tracing::info!("Server control on {}", sc.bind_addr);
 
-    // Start TCP service listeners
-    let mut svc_map: HashMap<String, Arc<TcpListener>> = HashMap::new();
-    for (name, svc) in &sc.services {
-        if svc.service_type == "udp" {
-            tracing::info!("  [{}] UDP on {}", name, svc.bind_addr.as_deref().unwrap_or("?"));
-            continue;
-        }
-        if let Some(ref addr) = svc.bind_addr {
-            let l = TcpListener::bind(addr).await?;
-            tracing::info!("  [{}] TCP on {}", name, addr);
-            svc_map.insert(name.clone(), Arc::new(l));
-        }
-    }
-    let svc_map = Arc::new(svc_map);
     let sc = Arc::new(sc);
 
+    // For each service, create a channel of idle data connections (pool)
+    // When client connects and auths, its TcpStream goes into the pool.
+    // When visitor connects, we take one from the pool and relay.
+    let pools: Arc<HashMap<String, Arc<Mutex<Vec<TcpStream>>>>> = {
+        let mut m = HashMap::new();
+        for name in sc.services.keys() {
+            m.insert(name.clone(), Arc::new(Mutex::new(Vec::new())));
+        }
+        Arc::new(m)
+    };
+
+    // Start visitor listeners for each service
+    for (name, svc) in &sc.services {
+        if let Some(ref addr) = svc.bind_addr {
+            let listener = TcpListener::bind(addr).await?;
+            tracing::info!("  [{}] visitors on {}", name, addr);
+            let pool = pools.get(name).unwrap().clone();
+            let svc_name = name.clone();
+            tokio::spawn(async move {
+                accept_visitors(listener, pool, svc_name).await;
+            });
+        }
+    }
+
+    // Accept client (data channel) connections on control port
+    let cfg = sc.clone();
     loop {
-        let (stream, addr) = listener.accept().await?;
-        let cfg = sc.clone();
-        let svcs = svc_map.clone();
+        let (stream, addr) = control_listener.accept().await?;
+        let pools = pools.clone();
+        let config = cfg.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle(stream, cfg, svcs).await {
-                tracing::error!("{}: {}", addr, e);
+            if let Err(e) = handle_client_connection(stream, config, pools).await {
+                tracing::debug!("{}: {}", addr, e);
             }
         });
     }
 }
 
-async fn handle(stream: TcpStream, config: Arc<crate::config::ServerConfig>, svcs: Arc<HashMap<String, Arc<TcpListener>>>) -> Result<()> {
+/// Accept a client connection: auth, then put the raw TcpStream into the pool.
+/// The client keeps reconnecting (one connection per relay).
+async fn handle_client_connection(
+    stream: TcpStream,
+    config: Arc<crate::config::ServerConfig>,
+    pools: Arc<HashMap<String, Arc<Mutex<Vec<TcpStream>>>>>,
+) -> Result<()> {
     let _ = stream.set_nodelay(true);
     let mut framed = Framed::new(stream, MessageCodec);
+
+    // Auth
     let auth = match framed.next().await {
         Some(Ok(Message::Auth(a))) => a,
         _ => return Err(anyhow::anyhow!("Expected Auth")),
     };
+
     let svc = config.services.get(&auth.service_name)
-        .ok_or_else(|| anyhow::anyhow!("Unknown service"))?;
+        .ok_or_else(|| anyhow::anyhow!("Unknown service: {}", auth.service_name))?;
     let token = svc.token.as_ref().or(config.default_token.as_ref())
         .ok_or_else(|| anyhow::anyhow!("No token"))?;
     if auth.token_hash != protocol::hash_token(token) {
-        framed.send(Message::AuthResp(AuthResponse { success: false, message: "Bad token".into(), session_id: None })).await?;
+        framed.send(Message::AuthResp(AuthResponse {
+            success: false, message: "Bad token".into(), session_id: None,
+        })).await?;
         return Ok(());
     }
-    let sid = Uuid::new_v4().to_string();
-    framed.send(Message::AuthResp(AuthResponse { success: true, message: "OK".into(), session_id: Some(sid) })).await?;
+
+    framed.send(Message::AuthResp(AuthResponse {
+        success: true, message: "OK".into(), session_id: Some(Uuid::new_v4().to_string()),
+    })).await?;
+
+    tracing::info!("Client ready for '{}'", auth.service_name);
+
+    // Get the raw TcpStream back (no more framing from here)
     let tcp = framed.into_inner();
 
-    if svc.service_type == "udp" {
-        let addr = svc.bind_addr.as_deref().ok_or_else(|| anyhow::anyhow!("UDP needs bind_addr"))?;
-        return udp_server(tcp, addr).await;
-    }
+    // Put into the pool — waiting for a visitor to use it
+    let pool = pools.get(&auth.service_name)
+        .ok_or_else(|| anyhow::anyhow!("No pool for '{}'", auth.service_name))?;
+    pool.lock().await.push(tcp);
 
-    let listener = svcs.get(&auth.service_name).ok_or_else(|| anyhow::anyhow!("No listener"))?.clone();
-    if auth.mux_enabled { mux_srv(tcp, listener).await } else { simple_srv(tcp, listener).await }
-}
-
-async fn udp_server(tcp: TcpStream, bind_addr: &str) -> Result<()> {
-    let (mut cr, cw) = tcp.into_split();
-    let cw = Arc::new(Mutex::new(cw));
-    let (tx, rx) = tokio::sync::mpsc::channel(256);
-    let read_task = tokio::spawn(async move {
-        loop {
-            match mux::read_frame(&mut cr).await {
-                Ok((sid, _f, data)) => { let _ = tx.send((sid, data)).await; }
-                Err(_) => break,
-            }
-        }
-    });
-    let _ = crate::udp::server_udp(bind_addr, cw, rx).await;
-    read_task.abort();
     Ok(())
 }
 
-async fn mux_srv(tcp: TcpStream, listener: Arc<TcpListener>) -> Result<()> {
-    let (mut cr, cw) = tcp.into_split();
-    let cw = Arc::new(Mutex::new(cw));
-    let muxer = Multiplexer::server();
-    let streams: Arc<Mutex<HashMap<u32, tokio::sync::mpsc::Sender<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
-    let sc = streams.clone();
-    tokio::spawn(async move {
-        loop {
-            match mux::read_frame(&mut cr).await {
-                Ok((id, f, data)) => {
-                    if f == mux::FLAG_FIN { sc.lock().await.remove(&id.0); continue; }
-                    if let Some(tx) = sc.lock().await.get(&id.0) { let _ = tx.send(data).await; }
-                }
-                Err(_) => break,
-            }
-        }
-    });
+/// Accept visitors on a service port. For each visitor,
+/// take an idle client connection from pool and relay transparently.
+async fn accept_visitors(
+    listener: TcpListener,
+    pool: Arc<Mutex<Vec<TcpStream>>>,
+    service_name: String,
+) {
     loop {
-        let (v, _) = listener.accept().await?;
-        let _ = v.set_nodelay(true);
-        let id = muxer.next_id().await;
-        let cw2 = cw.clone();
-        { let mut w = cw2.lock().await; mux::write_syn_frame(&mut *w, id).await?; }
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(256);
-        streams.lock().await.insert(id.0, tx);
-        let cw3 = cw.clone();
+        let (visitor, vaddr) = match listener.accept().await {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let _ = visitor.set_nodelay(true);
+
+        // Take a client data channel from pool
+        let client_stream = {
+            let mut p = pool.lock().await;
+            if p.is_empty() {
+                tracing::warn!("[{}] No client available for visitor {}", service_name, vaddr);
+                drop(visitor);
+                continue;
+            }
+            p.remove(0)
+        };
+
+        tracing::info!("[{}] Relay: visitor {} <-> client", service_name, vaddr);
+
+        // Transparent relay — raw TCP copy, no framing
         tokio::spawn(async move {
-            let (mut vr, mut vw) = v.into_split();
-            let w = cw3; let sid = id;
-            let t1 = tokio::spawn(async move {
-                let mut buf = [0u8; 8192];
-                loop { match vr.read(&mut buf).await { Ok(0) | Err(_) => break, Ok(n) => { let mut ww = w.lock().await; if mux::write_data_frame(&mut *ww, sid, &buf[..n]).await.is_err() { break; } } } }
-            });
-            let t2 = tokio::spawn(async move { while let Some(d) = rx.recv().await { if vw.write_all(&d).await.is_err() { break; } } });
-            let _ = tokio::join!(t1, t2);
+            let _ = relay(visitor, client_stream).await;
         });
     }
 }
 
-async fn simple_srv(tcp: TcpStream, listener: Arc<TcpListener>) -> Result<()> {
-    let (v, _) = listener.accept().await?;
-    let _ = v.set_nodelay(true);
-    let (mut vr, mut vw) = v.into_split();
-    let (mut cr, mut cw) = tcp.into_split();
-    tokio::select! { _ = tokio::io::copy(&mut vr, &mut cw) => {} _ = tokio::io::copy(&mut cr, &mut vw) => {} }
+/// Transparent bidirectional TCP relay (zero modification to bytes)
+async fn relay(mut a: TcpStream, mut b: TcpStream) -> Result<()> {
+    let (mut ar, mut aw) = a.split();
+    let (mut br, mut bw) = b.split();
+    tokio::select! {
+        r = tokio::io::copy(&mut ar, &mut bw) => { r?; }
+        r = tokio::io::copy(&mut br, &mut aw) => { r?; }
+    }
     Ok(())
 }
