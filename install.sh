@@ -36,7 +36,7 @@ readonly CONFIG_DIR="/etc/rathole-pro"
 readonly LOG_DIR="/var/log/rathole-pro"
 readonly BINARY_NAME="rathole-pro"
 readonly GITHUB_REPO="iPmartNetwork/RatholePro"
-readonly APP_VERSION="0.4.1"
+readonly APP_VERSION="0.4.2"
 readonly SERVICE_PREFIX="rathole-pro"
 readonly AUTHOR="iPmart Network (Ali Hassanzadeh)"
 

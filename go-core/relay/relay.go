@@ -6,23 +6,30 @@ import (
 	"sync"
 )
 
+const bufSize = 64 * 1024 // 64KB buffer for high throughput
+
 // Relay performs transparent bidirectional TCP copy between two connections.
-// It closes both connections when either direction finishes or errors.
 func Relay(a, b net.Conn) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	copyAndClose := func(dst, src net.Conn) {
+	go func() {
 		defer wg.Done()
-		_, _ = io.Copy(dst, src)
-		// Signal the other side we're done reading
-		if tc, ok := dst.(*net.TCPConn); ok {
+		buf := make([]byte, bufSize)
+		_, _ = io.CopyBuffer(a, b, buf)
+		if tc, ok := a.(*net.TCPConn); ok {
 			_ = tc.CloseWrite()
 		}
-	}
+	}()
 
-	go copyAndClose(a, b)
-	go copyAndClose(b, a)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, bufSize)
+		_, _ = io.CopyBuffer(b, a, buf)
+		if tc, ok := b.(*net.TCPConn); ok {
+			_ = tc.CloseWrite()
+		}
+	}()
 
 	wg.Wait()
 	_ = a.Close()
