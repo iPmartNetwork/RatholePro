@@ -10,9 +10,6 @@
 
 set -eo pipefail
 
-# Ensure interactive input works even when piped (curl | bash)
-exec < /dev/tty 2>/dev/null || true
-
 # ─── Colors ────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -1062,6 +1059,11 @@ update_binary() {
 # ─── Main Menu ─────────────────────────────────────────────────
 
 main_menu() {
+    # Redirect stdin from tty for interactive use when piped
+    if [[ ! -t 0 ]]; then
+        exec < /dev/tty
+    fi
+
     while true; do
         print_banner
         echo -e "  ${BOLD}Main Menu${NC}"
