@@ -51,8 +51,16 @@ async fn main() -> anyhow::Result<()> {
 
     // Handle --gen-key
     if cli.gen_key {
-        generate_noise_keypair();
-        return Ok(());
+        #[cfg(feature = "transport-noise")]
+        {
+            generate_noise_keypair();
+            return Ok(());
+        }
+        #[cfg(not(feature = "transport-noise"))]
+        {
+            eprintln!("Noise transport feature not enabled. Build with --features transport-noise");
+            return Ok(());
+        }
     }
 
     // Config file is required for all other operations
@@ -84,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// Generate and print a Noise Protocol keypair
+#[cfg(feature = "transport-noise")]
 fn generate_noise_keypair() {
     use snow::Builder;
     use base64::Engine;
