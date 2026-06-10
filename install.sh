@@ -2,10 +2,10 @@
 
 # ═══════════════════════════════════════════════════════════════
 # RatholePro - Professional Installation & Management Script
-# Next-generation reverse proxy tunnel with multiplexing,
+# Next-generation reverse proxy tunnel with yamux multiplexing,
 # multi-transport, load balancing, P2P, and UDP support.
 # Developer: iPmart Network (Ali Hassanzadeh)
-# Version: 0.3.0
+# Version: 0.4.0 (Go Core)
 # ═══════════════════════════════════════════════════════════════
 
 # Auto-download and re-exec if running from pipe (bash <(curl ...))
@@ -47,23 +47,22 @@ print_banner() {
     echo -e "${CYAN}"
     echo "╔═══════════════════════════════════════════════════════════╗"
     echo "║                                                           ║"
-    echo "║              Rathole Pro v${APP_VERSION}                        ║"
+    echo "║              Rathole Pro v${APP_VERSION} (Go + Yamux)           ║"
     echo "║     High-Performance Tunnel + Multi-Protocol + Mux        ║"
     echo "║                                                           ║"
-    echo "║  Transports: TCP │ TLS │ Noise │ WS │ WSS │ QUIC         ║"
-    echo "║  Protocols:  TCP │ UDP │ HTTP                             ║"
-    echo "║  Features:   Mux │ Load Balance │ P2P │ IPv6              ║"
+    echo "║  Transports: TCP │ TLS (auto-cert) │ Noise │ WebSocket   ║"
+    echo "║  Protocols:  TCP │ UDP                                    ║"
+    echo "║  Features:   Yamux Mux │ Load Balance │ P2P │ IPv6        ║"
     echo "║                                                           ║"
     echo "║  Developer: iPmart Network (Ali Hassanzadeh)              ║"
     echo "║                                                           ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 
-    # Show binary status
     if [[ -x "${RATHOLE_PRO_DIR}/${BINARY_NAME}" ]]; then
         local ver
-        ver=$("${RATHOLE_PRO_DIR}/${BINARY_NAME}" --version 2>/dev/null | awk '{print $NF}')
-        echo -e "  ${GREEN}● Binary: Installed (v${ver:-unknown})${NC}"
+        ver=$("${RATHOLE_PRO_DIR}/${BINARY_NAME}" --version 2>/dev/null | head -1)
+        echo -e "  ${GREEN}● Binary: ${ver}${NC}"
     else
         echo -e "  ${RED}● Binary: NOT INSTALLED${NC}"
     fi
@@ -93,18 +92,12 @@ check_root() {
 
 detect_os() {
     OS="linux"
-    OS_VERSION="unknown"
     OS_NAME="Linux"
     if [[ -f /etc/os-release ]]; then
         OS=$(grep -m1 '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"') || true
-        OS_VERSION=$(grep -m1 '^VERSION_ID=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"') || true
         OS_NAME=$(grep -m1 '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"') || true
         OS="${OS:-linux}"
-        OS_VERSION="${OS_VERSION:-unknown}"
         OS_NAME="${OS_NAME:-Linux}"
-    elif [[ -f /etc/redhat-release ]]; then
-        OS="centos"
-        OS_NAME=$(cat /etc/redhat-release)
     fi
     print_info "OS: ${OS_NAME}"
 }
@@ -112,11 +105,12 @@ detect_os() {
 detect_arch() {
     ARCH=$(uname -m)
     case "${ARCH}" in
-        x86_64|amd64)   ARCH="x86_64" ;;
-        aarch64|arm64)  ARCH="aarch64" ;;
+        x86_64|amd64)   ARCH="amd64" ;;
+        aarch64|arm64)  ARCH="arm64" ;;
         armv7l|armhf)   ARCH="armv7" ;;
-        i686|i386)      ARCH="i686" ;;
-        mips|mipsel)    ARCH="mips" ;;
+        i686|i386)      ARCH="386" ;;
+        mips64)         ARCH="mips64" ;;
+        mips)           ARCH="mips" ;;
         *)
             print_error "Unsupported architecture: ${ARCH}"
             exit 1
@@ -125,31 +119,11 @@ detect_arch() {
     print_info "Architecture: ${ARCH}"
 }
 
-detect_ipv6() {
-    if [[ -f /proc/net/if_inet6 ]] && [[ -s /proc/net/if_inet6 ]]; then
-        IPV6_AVAILABLE=true
-        print_info "IPv6: Available"
-    else
-        IPV6_AVAILABLE=false
-        print_info "IPv6: Not available"
-    fi
-}
-
 generate_token() {
-    # Generate secure random token
     if command -v openssl &>/dev/null; then
         openssl rand -hex 16
     else
         tr -dc 'a-f0-9' </dev/urandom | head -c 32
-    fi
-}
-
-generate_noise_keypair() {
-    # Generate 32-byte key encoded as base64
-    if command -v openssl &>/dev/null; then
-        openssl rand -base64 32
-    else
-        head -c 32 /dev/urandom | base64
     fi
 }
 
@@ -159,42 +133,30 @@ install_dependencies() {
     print_step "Installing dependencies..."
     if command -v apt-get &>/dev/null; then
         apt-get update -qq >/dev/null 2>&1
-        apt-get install -y -qq curl wget tar jq openssl >/dev/null 2>&1
+        apt-get install -y -qq curl wget tar jq >/dev/null 2>&1
     elif command -v dnf &>/dev/null; then
-        dnf install -y -q curl wget tar jq openssl >/dev/null 2>&1
+        dnf install -y -q curl wget tar jq >/dev/null 2>&1
     elif command -v yum &>/dev/null; then
-        yum install -y -q curl wget tar jq openssl >/dev/null 2>&1
+        yum install -y -q curl wget tar jq >/dev/null 2>&1
     elif command -v pacman &>/dev/null; then
-        pacman -Sy --noconfirm --quiet curl wget tar jq openssl >/dev/null 2>&1
+        pacman -Sy --noconfirm --quiet curl wget tar jq >/dev/null 2>&1
     elif command -v apk &>/dev/null; then
-        apk add --quiet curl wget tar jq openssl >/dev/null 2>&1
-    else
-        print_warning "Unknown package manager. Please install: curl wget tar jq openssl"
+        apk add --quiet curl wget tar jq >/dev/null 2>&1
     fi
-    print_success "Dependencies installed"
+    print_success "Dependencies ready"
 }
 
 download_binary() {
-    print_step "Downloading RatholePro for ${ARCH}..."
+    print_step "Downloading RatholePro (Go) for linux/${ARCH}..."
     mkdir -p "${RATHOLE_PRO_DIR}"
     mkdir -p "${CONFIG_DIR}"
     mkdir -p "${LOG_DIR}"
 
-    # Remove old binary to ensure fresh download
     rm -f "${RATHOLE_PRO_DIR}/${BINARY_NAME}" 2>/dev/null
 
-    # Determine the correct asset name based on architecture
-    local asset_name=""
-    case "${ARCH}" in
-        x86_64)   asset_name="${BINARY_NAME}-x86_64-linux" ;;
-        aarch64)  asset_name="${BINARY_NAME}-aarch64-linux" ;;
-        armv7)    asset_name="${BINARY_NAME}-armv7-linux" ;;
-        i686)     asset_name="${BINARY_NAME}-i686-linux" ;;
-        mips)     asset_name="${BINARY_NAME}-mips-linux" ;;
-        *)        asset_name="${BINARY_NAME}-${ARCH}-linux" ;;
-    esac
+    local asset_name="${BINARY_NAME}-linux-${ARCH}"
 
-    # Try to get latest release version from GitHub API
+    # Try GitHub releases
     local latest_version="${APP_VERSION}"
     if command -v curl &>/dev/null && command -v jq &>/dev/null; then
         local api_response
@@ -209,76 +171,55 @@ download_binary() {
         fi
     fi
 
-    # Download URL from GitHub Releases
     local download_url="https://github.com/${GITHUB_REPO}/releases/download/v${latest_version}/${asset_name}"
     local tmp_file="/tmp/${asset_name}"
 
-    print_info "Downloading: ${download_url}"
+    print_info "URL: ${download_url}"
 
-    # Download binary
     local download_ok=false
     if command -v curl &>/dev/null; then
-        if curl -fsSL -o "${tmp_file}" "${download_url}" 2>/dev/null; then
-            download_ok=true
-        fi
+        curl -fsSL -o "${tmp_file}" "${download_url}" 2>/dev/null && download_ok=true
     elif command -v wget &>/dev/null; then
-        if wget -q -O "${tmp_file}" "${download_url}" 2>/dev/null; then
-            download_ok=true
-        fi
+        wget -q -O "${tmp_file}" "${download_url}" 2>/dev/null && download_ok=true
     fi
 
-    # If direct binary didn't work, try .tar.gz format
+    # Try .tar.gz
     if [[ "${download_ok}" != true ]]; then
-        local tar_url="https://github.com/${GITHUB_REPO}/releases/download/v${latest_version}/${asset_name}.tar.gz"
+        local tar_url="${download_url}.tar.gz"
         local tar_file="/tmp/${asset_name}.tar.gz"
         print_info "Trying archive format..."
-
         if command -v curl &>/dev/null; then
             curl -fsSL -o "${tar_file}" "${tar_url}" 2>/dev/null
         elif command -v wget &>/dev/null; then
             wget -q -O "${tar_file}" "${tar_url}" 2>/dev/null
         fi
-
         if [[ -f "${tar_file}" ]] && [[ -s "${tar_file}" ]]; then
-            tar -xzf "${tar_file}" -C "${RATHOLE_PRO_DIR}/" 2>/dev/null && {
-                download_ok=true
-                rm -f "${tar_file}"
-            }
+            tar -xzf "${tar_file}" -C "${RATHOLE_PRO_DIR}/" 2>/dev/null && download_ok=true
+            rm -f "${tar_file}"
         fi
     fi
 
-    # Install the binary
     if [[ "${download_ok}" == true ]] && [[ -f "${tmp_file}" ]] && [[ -s "${tmp_file}" ]]; then
         mv "${tmp_file}" "${RATHOLE_PRO_DIR}/${BINARY_NAME}"
         chmod +x "${RATHOLE_PRO_DIR}/${BINARY_NAME}"
-        print_success "Binary installed: ${RATHOLE_PRO_DIR}/${BINARY_NAME}"
-
-        # Verify binary works
-        if "${RATHOLE_PRO_DIR}/${BINARY_NAME}" --version &>/dev/null; then
-            local installed_ver
-            installed_ver=$("${RATHOLE_PRO_DIR}/${BINARY_NAME}" --version 2>/dev/null | awk '{print $NF}')
-            print_success "Version: ${installed_ver}"
-        fi
-
-        # Add to PATH via symlink
         ln -sf "${RATHOLE_PRO_DIR}/${BINARY_NAME}" /usr/local/bin/${BINARY_NAME} 2>/dev/null
-        print_info "Symlinked to /usr/local/bin/${BINARY_NAME}"
+        print_success "Binary installed: ${RATHOLE_PRO_DIR}/${BINARY_NAME}"
+        if "${RATHOLE_PRO_DIR}/${BINARY_NAME}" --version &>/dev/null; then
+            print_success "Verified: $("${RATHOLE_PRO_DIR}/${BINARY_NAME}" --version 2>/dev/null)"
+        fi
     elif [[ -x "${RATHOLE_PRO_DIR}/${BINARY_NAME}" ]]; then
-        # Already installed from tar extraction
         chmod +x "${RATHOLE_PRO_DIR}/${BINARY_NAME}"
         ln -sf "${RATHOLE_PRO_DIR}/${BINARY_NAME}" /usr/local/bin/${BINARY_NAME} 2>/dev/null
-        print_success "Binary installed: ${RATHOLE_PRO_DIR}/${BINARY_NAME}"
+        print_success "Binary installed from archive"
     else
         print_error "Download failed!"
         echo ""
-        echo -e "  ${YELLOW}No release found for your architecture (${ARCH}).${NC}"
-        echo -e "  ${YELLOW}Build from source:${NC}"
+        echo -e "  ${YELLOW}Build from source (requires Go 1.22+):${NC}"
         echo ""
-        echo "    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-        echo "    source ~/.cargo/env"
         echo "    git clone https://github.com/${GITHUB_REPO}.git"
-        echo "    cd RatholePro && cargo build --release"
-        echo "    sudo cp target/release/${BINARY_NAME} ${RATHOLE_PRO_DIR}/"
+        echo "    cd RatholePro/go-core"
+        echo "    go build -o ${BINARY_NAME} ."
+        echo "    sudo cp ${BINARY_NAME} ${RATHOLE_PRO_DIR}/"
         echo "    sudo ln -sf ${RATHOLE_PRO_DIR}/${BINARY_NAME} /usr/local/bin/${BINARY_NAME}"
         echo ""
         rm -f "${tmp_file}" 2>/dev/null
@@ -295,7 +236,6 @@ full_install() {
     check_root
     detect_os
     detect_arch
-    detect_ipv6
     echo ""
     install_dependencies
     download_binary
@@ -309,23 +249,21 @@ full_install() {
 
 select_transport() {
     echo ""
-    echo -e "  ${BOLD}Select Transport Protocol:${NC}"
-    echo -e "    ${GREEN}1)${NC} tcp   ${DIM}- Raw TCP (fastest, no encryption)${NC}"
-    echo -e "    ${GREEN}2)${NC} tls   ${DIM}- TLS 1.3 (certificate-based encryption)${NC}"
-    echo -e "    ${GREEN}3)${NC} noise ${DIM}- Noise Protocol (no certificates needed)${NC}"
-    echo -e "    ${GREEN}4)${NC} ws    ${DIM}- WebSocket (bypass firewalls/CDN)${NC}"
-    echo -e "    ${GREEN}5)${NC} wss   ${DIM}- WebSocket + TLS (secure + bypass)${NC}"
-    echo -e "    ${GREEN}6)${NC} quic  ${DIM}- QUIC (UDP-based, low latency, built-in TLS)${NC}"
+    echo -e "  ${BOLD}Select Transport:${NC}"
+    echo -e "    ${GREEN}1)${NC} tcp        ${DIM}- Raw TCP (fastest, no encryption)${NC}"
+    echo -e "    ${GREEN}2)${NC} tls (auto) ${DIM}- TLS with auto-generated cert (no domain needed!)${NC}"
+    echo -e "    ${GREEN}3)${NC} tls (manual) ${DIM}- TLS with your own cert${NC}"
+    echo -e "    ${GREEN}4)${NC} noise      ${DIM}- Noise Protocol (no certificates needed)${NC}"
+    echo -e "    ${GREEN}5)${NC} ws         ${DIM}- WebSocket (bypass firewalls)${NC}"
     echo ""
     echo -n "  Choice [1]: "; read -r transport_choice
 
     case "${transport_choice:-1}" in
         1) TRANSPORT="tcp" ;;
-        2) TRANSPORT="tls" ;;
-        3) TRANSPORT="noise" ;;
-        4) TRANSPORT="ws" ;;
-        5) TRANSPORT="wss" ;;
-        6) TRANSPORT="quic" ;;
+        2) TRANSPORT="tls_auto" ;;
+        3) TRANSPORT="tls" ;;
+        4) TRANSPORT="noise" ;;
+        5) TRANSPORT="ws" ;;
         *) TRANSPORT="tcp" ;;
     esac
     print_info "Transport: ${TRANSPORT}"
@@ -334,13 +272,22 @@ select_transport() {
 configure_transport_server() {
     local config_file="$1"
 
-    cat >> "${config_file}" << EOF
+    case "${TRANSPORT}" in
+        tcp)
+            # No transport section needed
+            ;;
+        tls_auto)
+            cat >> "${config_file}" << EOF
 
 [server.transport]
-type = "${TRANSPORT}"
-EOF
+type = "tls"
 
-    case "${TRANSPORT}" in
+[server.transport.tls]
+auto_cert = true
+cert_dir = "/etc/rathole-pro/certs"
+EOF
+            print_success "TLS auto-cert enabled (no domain needed, cert auto-generated)"
+            ;;
         tls)
             echo ""
             print_step "TLS Configuration (Server)"
@@ -348,12 +295,13 @@ EOF
             echo -n "  Private key PEM path: "; read -r key_path
 
             if [[ ! -f "${cert_path}" ]]; then
-                print_warning "Certificate file not found: ${cert_path}"
-                print_info "You can generate a self-signed cert with:"
-                echo "    openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes"
+                print_warning "Cert not found: ${cert_path}"
             fi
 
             cat >> "${config_file}" << EOF
+
+[server.transport]
+type = "tls"
 
 [server.transport.tls]
 trusted_root = "${cert_path}"
@@ -362,61 +310,39 @@ EOF
             ;;
         noise)
             echo ""
-            print_step "Noise Protocol Configuration (Server)"
-            local private_key
-            private_key=$(generate_noise_keypair)
-            echo ""
-            echo -e "  ${YELLOW}╔══ Generated Server Keypair ══╗${NC}"
-            echo -e "  ${YELLOW}║${NC} Private Key (SERVER - keep secret):"
-            echo -e "  ${YELLOW}║${NC}   ${BOLD}${private_key}${NC}"
-            echo -e "  ${YELLOW}║${NC}"
-            echo -e "  ${YELLOW}║${NC} ${DIM}Share the public key with clients after build.${NC}"
-            echo -e "  ${YELLOW}║${NC} ${DIM}Use: rathole-pro --gen-key for proper keypair.${NC}"
-            echo -e "  ${YELLOW}╚══════════════════════════════╝${NC}"
-            echo ""
+            print_step "Generating Noise keypair..."
+            if [[ -x "${RATHOLE_PRO_DIR}/${BINARY_NAME}" ]]; then
+                echo ""
+                "${RATHOLE_PRO_DIR}/${BINARY_NAME}" --gen-key
+                echo ""
+                echo -n "  Paste the Private Key here: "; read -r private_key
+            else
+                private_key=$(head -c 32 /dev/urandom | base64)
+                echo -e "  ${YELLOW}Generated Private Key: ${private_key}${NC}"
+            fi
 
             cat >> "${config_file}" << EOF
+
+[server.transport]
+type = "noise"
 
 [server.transport.noise]
 pattern = "Noise_NK_25519_ChaChaPoly_BLAKE2s"
 local_private_key = "${private_key}"
 EOF
             ;;
-        ws|wss)
+        ws)
             echo ""
-            print_step "WebSocket Configuration (Server)"
             echo -n "  WebSocket path [/tunnel]: "; read -r ws_path
             ws_path="${ws_path:-/tunnel}"
 
             cat >> "${config_file}" << EOF
 
+[server.transport]
+type = "ws"
+
 [server.transport.websocket]
 path = "${ws_path}"
-EOF
-            if [[ "${TRANSPORT}" == "wss" ]]; then
-                echo -n "  Certificate PEM path: "; read -r cert_path
-                echo -n "  Private key PEM path: "; read -r key_path
-                cat >> "${config_file}" << EOF
-
-[server.transport.tls]
-trusted_root = "${cert_path}"
-pkcs12 = "${key_path}"
-EOF
-            fi
-            ;;
-        quic)
-            echo ""
-            print_step "QUIC Configuration (Server)"
-            echo -n "  Certificate PEM path: "; read -r cert_path
-            echo -n "  Private key PEM path: "; read -r key_path
-
-            cat >> "${config_file}" << EOF
-
-[server.transport.quic]
-cert = "${cert_path}"
-key = "${key_path}"
-max_streams = 100
-keep_alive = 15
 EOF
             ;;
     esac
@@ -424,28 +350,32 @@ EOF
 
 configure_transport_client() {
     local config_file="$1"
-    local remote_addr="$2"
-
-    cat >> "${config_file}" << EOF
-
-[client.transport]
-type = "${TRANSPORT}"
-EOF
 
     case "${TRANSPORT}" in
+        tcp)
+            ;;
+        tls_auto)
+            # Client just uses TLS with skip verify (no cert needed)
+            cat >> "${config_file}" << EOF
+
+[client.transport]
+type = "tls"
+
+[client.transport.tls]
+EOF
+            print_success "TLS enabled (auto-verify skip for self-signed server cert)"
+            ;;
         tls)
             echo ""
             print_step "TLS Configuration (Client)"
-            local hostname
-            hostname=$(echo "${remote_addr}" | cut -d: -f1)
-            echo -n "  TLS hostname [${hostname}]: "; read -r tls_host
-            tls_host="${tls_host:-${hostname}}"
-            echo -n "  CA cert path (empty=system CAs): "; read -r ca_path
+            echo -n "  CA cert path (empty=skip verify): "; read -r ca_path
 
             cat >> "${config_file}" << EOF
 
+[client.transport]
+type = "tls"
+
 [client.transport.tls]
-hostname = "${tls_host}"
 EOF
             if [[ -n "${ca_path}" ]]; then
                 echo "trusted_root = \"${ca_path}\"" >> "${config_file}"
@@ -453,47 +383,36 @@ EOF
             ;;
         noise)
             echo ""
-            print_step "Noise Protocol Configuration (Client)"
+            print_step "Noise Configuration (Client)"
             echo -n "  Server public key (base64): "; read -r server_pub_key
-
             if [[ -z "${server_pub_key}" ]]; then
-                print_error "Server public key is required for Noise transport!"
+                print_error "Server public key is required!"
                 return 1
             fi
 
             cat >> "${config_file}" << EOF
+
+[client.transport]
+type = "noise"
 
 [client.transport.noise]
 pattern = "Noise_NK_25519_ChaChaPoly_BLAKE2s"
 remote_public_key = "${server_pub_key}"
 EOF
             ;;
-        ws|wss)
+        ws)
             echo ""
-            print_step "WebSocket Configuration (Client)"
             echo -n "  WebSocket path [/tunnel]: "; read -r ws_path
             ws_path="${ws_path:-/tunnel}"
 
             cat >> "${config_file}" << EOF
 
+[client.transport]
+type = "ws"
+
 [client.transport.websocket]
 path = "${ws_path}"
 EOF
-            ;;
-        quic)
-            echo ""
-            print_step "QUIC Configuration (Client)"
-            echo -n "  CA cert path (empty=system CAs): "; read -r ca_path
-
-            cat >> "${config_file}" << EOF
-
-[client.transport.quic]
-max_streams = 100
-keep_alive = 15
-EOF
-            if [[ -n "${ca_path}" ]]; then
-                echo "ca = \"${ca_path}\"" >> "${config_file}"
-            fi
             ;;
     esac
 }
@@ -507,8 +426,8 @@ create_systemd_service() {
 
     cat > "/etc/systemd/system/${service_name}.service" << EOF
 [Unit]
-Description=Rathole Pro Tunnel (${mode})
-Documentation=https://github.com/iPmartNetwork/RatholePro
+Description=RatholePro Tunnel (${mode})
+Documentation=https://github.com/${GITHUB_REPO}
 After=network-online.target
 Wants=network-online.target
 
@@ -523,12 +442,10 @@ LimitNPROC=512
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=${service_name}
-
-# Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=${LOG_DIR}
+ReadWritePaths=${LOG_DIR} ${CONFIG_DIR}
 PrivateTmp=true
 
 [Install]
@@ -537,8 +454,7 @@ EOF
 
     systemctl daemon-reload
     systemctl enable "${service_name}" >/dev/null 2>&1
-    print_success "Systemd service created: ${service_name}"
-    print_info "Start with: systemctl start ${service_name}"
+    print_success "Systemd service: ${service_name}"
 }
 
 # ─── IRAN Server Configuration ─────────────────────────────────
@@ -548,21 +464,18 @@ configure_iran() {
     print_divider
     echo -e "  ${BOLD}IRAN Server Setup${NC}"
     echo -e "  ${CYAN}╔═══════════════════════════════════════════════╗${NC}"
-    echo -e "  ${CYAN}║  This is your IRAN server.                   ║${NC}"
-    echo -e "  ${CYAN}║  Users connect to THIS IP.                   ║${NC}"
-    echo -e "  ${CYAN}║  Traffic goes: User → Iran → Tunnel → Kharej ║${NC}"
+    echo -e "  ${CYAN}║  This is your IRAN server (public IP).       ║${NC}"
+    echo -e "  ${CYAN}║  Users connect HERE.                         ║${NC}"
+    echo -e "  ${CYAN}║  Traffic: User → Iran → Tunnel → Kharej      ║${NC}"
     echo -e "  ${CYAN}╚═══════════════════════════════════════════════╝${NC}"
     print_divider
     echo ""
 
-    echo -e "  ${CYAN}Tunnel port (a free port for tunnel connection):${NC}"
-    echo -n "  Port [2333]: "; read -r server_port
+    echo -n "  Tunnel port [2333]: "; read -r server_port
     server_port="${server_port:-2333}"
-    bind_addr="0.0.0.0:${server_port}"
 
     echo ""
-    echo -e "  ${CYAN}Token (a password - same on both Iran & Kharej):${NC}"
-    echo -n "  Token (empty=auto): "; read -r default_token
+    echo -n "  Token (empty=auto-generate): "; read -r default_token
     if [[ -z "${default_token}" ]]; then
         default_token=$(generate_token)
         echo -e "  ${GREEN}Generated:${NC} ${default_token}"
@@ -575,35 +488,32 @@ configure_iran() {
     local config_file="${CONFIG_DIR}/server.toml"
     cat > "${config_file}" << EOF
 [server]
-bind_addr = "${bind_addr}"
+bind_addr = "0.0.0.0:${server_port}"
 default_token = "${default_token}"
 heartbeat_interval = 30
 EOF
+
     configure_transport_server "${config_file}"
 
     echo ""
     print_divider
-    echo -e "  ${BOLD}Ports to expose (users connect to these on Iran)${NC}"
-    echo -e "  ${DIM}Enter ports separated by comma. Example: 2083,443,8080${NC}"
-    echo -e "  ${DIM}Users will connect to IRAN_IP:PORT and traffic goes to Kharej.${NC}"
+    echo -e "  ${BOLD}Ports to expose (users connect to Iran on these ports)${NC}"
+    echo -e "  ${DIM}Comma separated. Example: 2083,443,8080${NC}"
     print_divider
     echo ""
-    echo -n "  Ports (comma separated): "; read -r input_ports
+    echo -n "  Ports: "; read -r input_ports
 
     if [[ -z "${input_ports}" ]]; then
         print_error "At least one port is required!"
         return 1
     fi
 
-    # Parse ports
-    input_ports=$(echo "${input_ports}" | tr -d ' ')
-    IFS=',' read -ra ports <<< "${input_ports}"
-
+    IFS=',' read -ra ports <<< "$(echo "${input_ports}" | tr -d ' ')"
     for port in "${ports[@]}"; do
         if [[ "${port}" =~ ^[0-9]+$ ]] && [ "${port}" -gt 0 ] && [ "${port}" -le 65535 ]; then
             cat >> "${config_file}" << EOF
 
-[server.services.${port}]
+[server.services.port${port}]
 type = "tcp"
 bind_addr = "0.0.0.0:${port}"
 EOF
@@ -614,75 +524,20 @@ EOF
     done
 
     echo ""
-    print_success "Config saved: ${config_file}"
+    print_success "Config: ${config_file}"
     echo ""
     echo -e "  ${YELLOW}════════════════════════════════════════════${NC}"
     echo -e "  ${YELLOW}  COPY THIS FOR KHAREJ SETUP:${NC}"
     echo -e "  ${YELLOW}  Token:       ${default_token}${NC}"
     echo -e "  ${YELLOW}  Tunnel Port: ${server_port}${NC}"
+    echo -e "  ${YELLOW}  Transport:   ${TRANSPORT}${NC}"
     echo -e "  ${YELLOW}════════════════════════════════════════════${NC}"
     echo ""
 
     create_systemd_service "server"
-
-    # Auto-start service
-    echo ""
     systemctl start "${SERVICE_PREFIX}-server" 2>/dev/null && \
-        print_success "Server service started!" || \
-        print_error "Failed to start server service"
-}
-
-add_services_server() {
-    local config_file="$1"
-    local add_more="y"
-
-    while [[ "${add_more}" =~ ^[Yy]$ ]]; do
-        echo ""
-        echo -n "  Service name: "; read -r svc_name
-        if [[ -z "${svc_name}" ]]; then
-            print_error "Service name cannot be empty"
-            continue
-        fi
-
-        echo -e "    Service type:"
-        echo -e "      ${GREEN}1)${NC} tcp ${DIM}(default)${NC}"
-        echo -e "      ${GREEN}2)${NC} udp ${DIM}(games, VPN, DNS)${NC}"
-        echo -e "      ${GREEN}3)${NC} http ${DIM}(web proxy)${NC}"
-        echo -n "    Type [1]: "; read -r svc_type_choice
-        case "${svc_type_choice:-1}" in
-            1) svc_type="tcp" ;;
-            2) svc_type="udp" ;;
-            3) svc_type="http" ;;
-            *) svc_type="tcp" ;;
-        esac
-
-        echo -n "  Bind port: "; read -r svc_port
-        if [[ -z "${svc_port}" ]]; then
-            print_error "Port cannot be empty"
-            continue
-        fi
-
-        echo -n "  Max mux streams [8]: "; read -r svc_mux
-        svc_mux="${svc_mux:-8}"
-
-        echo -n "  Custom token (empty=use default): "; read -r svc_token
-
-        cat >> "${config_file}" << EOF
-
-[server.services.${svc_name}]
-type = "${svc_type}"
-bind_addr = "0.0.0.0:${svc_port}"
-max_mux_streams = ${svc_mux}
-EOF
-
-        if [[ -n "${svc_token}" ]]; then
-            echo "token = \"${svc_token}\"" >> "${config_file}"
-        fi
-
-        print_success "Service '${svc_name}' added (${svc_type} on port ${svc_port})"
-        echo ""
-        echo -n "  Add another service? (y/n): "; read -r add_more
-    done
+        print_success "Server started!" || \
+        print_error "Failed to start (check: journalctl -u ${SERVICE_PREFIX}-server)"
 }
 
 # ─── KHAREJ Server Configuration ───────────────────────────────
@@ -694,31 +549,24 @@ configure_kharej() {
     echo -e "  ${CYAN}╔═══════════════════════════════════════════════╗${NC}"
     echo -e "  ${CYAN}║  This is your KHAREJ (abroad) server.        ║${NC}"
     echo -e "  ${CYAN}║  Your panel/service runs HERE.               ║${NC}"
-    echo -e "  ${CYAN}║  Traffic goes: Iran → Tunnel → Kharej:local  ║${NC}"
+    echo -e "  ${CYAN}║  Traffic: Iran → Tunnel → Kharej:local       ║${NC}"
     echo -e "  ${CYAN}╚═══════════════════════════════════════════════╝${NC}"
     print_divider
     echo ""
 
-    echo -e "  ${CYAN}Iran server IP address:${NC}"
-    echo -n "  Iran IP: "; read -r iran_ip
+    echo -n "  Iran server IP: "; read -r iran_ip
     if [[ -z "${iran_ip}" ]]; then
         print_error "Iran IP is required!"
         return 1
     fi
 
-    echo ""
-    echo -e "  ${CYAN}Tunnel port (the port you set on Iran server):${NC}"
-    echo -n "  Tunnel port: "; read -r tunnel_port
+    echo -n "  Tunnel port (same as Iran): "; read -r tunnel_port
     if [[ -z "${tunnel_port}" ]]; then
         print_error "Tunnel port is required!"
         return 1
     fi
 
-    local remote_addr="${iran_ip}:${tunnel_port}"
-
-    echo ""
-    echo -e "  ${CYAN}Token (must be SAME as Iran server):${NC}"
-    echo -n "  Token: "; read -r default_token
+    echo -n "  Token (same as Iran): "; read -r default_token
     if [[ -z "${default_token}" ]]; then
         print_error "Token is required!"
         return 1
@@ -731,424 +579,182 @@ configure_kharej() {
     local config_file="${CONFIG_DIR}/client.toml"
     cat > "${config_file}" << EOF
 [client]
-remote_addr = "${remote_addr}"
+remote_addr = "${iran_ip}:${tunnel_port}"
 default_token = "${default_token}"
 heartbeat_timeout = 40
 retry_interval = 1
 mux_connections = 4
 EOF
-    configure_transport_client "${config_file}" "${remote_addr}"
+
+    configure_transport_client "${config_file}"
 
     echo ""
     print_divider
-    echo -e "  ${BOLD}Ports to forward (your services on this machine)${NC}"
-    echo -e "  ${DIM}Enter ports separated by comma. Example: 2083,443,8080${NC}"
-    echo -e "  ${DIM}These ports will be forwarded through the tunnel.${NC}"
+    echo -e "  ${BOLD}Ports to forward (local services on this machine)${NC}"
+    echo -e "  ${DIM}Comma separated. Example: 2083,443,8080${NC}"
     print_divider
     echo ""
-    echo -n "  Ports (comma separated): "; read -r input_ports
+    echo -n "  Ports: "; read -r input_ports
 
     if [[ -z "${input_ports}" ]]; then
         print_error "At least one port is required!"
         return 1
     fi
 
-    # Parse ports
-    input_ports=$(echo "${input_ports}" | tr -d ' ')
-    IFS=',' read -ra ports <<< "${input_ports}"
-
+    IFS=',' read -ra ports <<< "$(echo "${input_ports}" | tr -d ' ')"
     for port in "${ports[@]}"; do
         if [[ "${port}" =~ ^[0-9]+$ ]] && [ "${port}" -gt 0 ] && [ "${port}" -le 65535 ]; then
             cat >> "${config_file}" << EOF
 
-[client.services.${port}]
+[client.services.port${port}]
 type = "tcp"
 local_addr = "127.0.0.1:${port}"
 mux_streams = 4
 EOF
-            print_success "Port ${port} added (127.0.0.1:${port})"
+            print_success "Port ${port} → 127.0.0.1:${port}"
         else
             print_error "Invalid port: ${port}"
         fi
     done
 
     echo ""
-    print_success "Config saved: ${config_file}"
-    echo ""
+    print_success "Config: ${config_file}"
 
     create_systemd_service "client"
-
-    # Auto-start service
-    echo ""
     systemctl start "${SERVICE_PREFIX}-client" 2>/dev/null && \
-        print_success "Client service started!" || \
-        print_error "Failed to start client service"
+        print_success "Client started!" || \
+        print_error "Failed to start (check: journalctl -u ${SERVICE_PREFIX}-client)"
 }
 
-add_services_client() {
-    local config_file="$1"
-    local add_more="y"
-
-    while [[ "${add_more}" =~ ^[Yy]$ ]]; do
-        echo ""
-        echo -n "  Service name (must match server): "; read -r svc_name
-        if [[ -z "${svc_name}" ]]; then
-            print_error "Service name cannot be empty"
-            continue
-        fi
-
-        echo -e "    Service type:"
-        echo -e "      ${GREEN}1)${NC} tcp ${DIM}(default)${NC}"
-        echo -e "      ${GREEN}2)${NC} udp"
-        echo -e "      ${GREEN}3)${NC} http"
-        echo -n "    Type [1]: "; read -r svc_type_choice
-        case "${svc_type_choice:-1}" in
-            1) svc_type="tcp" ;;
-            2) svc_type="udp" ;;
-            3) svc_type="http" ;;
-            *) svc_type="tcp" ;;
-        esac
-
-        echo -n "  Local address (e.g., 127.0.0.1:22): "; read -r local_addr
-        if [[ -z "${local_addr}" ]]; then
-            print_error "Local address is required"
-            continue
-        fi
-
-        echo -n "  Mux streams [4]: "; read -r svc_mux
-        svc_mux="${svc_mux:-4}"
-
-        # Load balancing
-        echo -n "  Enable load balancing? (y/n) [n]: "; read -r use_lb
-        local backends_config=""
-        local lb_config=""
-
-        if [[ "${use_lb}" =~ ^[Yy]$ ]]; then
-            echo -e "    Load balance strategy:"
-            echo -e "      ${GREEN}1)${NC} round_robin ${DIM}(default)${NC}"
-            echo -e "      ${GREEN}2)${NC} random"
-            echo -e "      ${GREEN}3)${NC} least_conn"
-            echo -n "    Strategy [1]: "; read -r lb_choice
-            case "${lb_choice:-1}" in
-                1) lb_strategy="round_robin" ;;
-                2) lb_strategy="random" ;;
-                3) lb_strategy="least_conn" ;;
-                *) lb_strategy="round_robin" ;;
-            esac
-
-            echo -n "  Health check interval (0=disable) [10]: "; read -r hc_interval
-            hc_interval="${hc_interval:-10}"
-
-            echo "  Enter backend addresses (one per line, empty to finish):"
-            local backends=()
-            backends+=("${local_addr}")
-            while true; do
-                echo -n "    Backend: "; read -r backend
-                [[ -z "${backend}" ]] && break
-                backends+=("${backend}")
-            done
-
-            backends_config="backends = [$(printf '"%s", ' "${backends[@]}" | sed 's/, $//')]"
-            lb_config="
-[client.services.${svc_name}.load_balance]
-strategy = \"${lb_strategy}\"
-health_check_interval = ${hc_interval}"
-        fi
-
-        echo -n "  Custom token (empty=use default): "; read -r svc_token
-
-        cat >> "${config_file}" << EOF
-
-[client.services.${svc_name}]
-type = "${svc_type}"
-local_addr = "${local_addr}"
-mux_streams = ${svc_mux}
-EOF
-
-        if [[ -n "${backends_config}" ]]; then
-            echo "${backends_config}" >> "${config_file}"
-        fi
-        if [[ -n "${svc_token}" ]]; then
-            echo "token = \"${svc_token}\"" >> "${config_file}"
-        fi
-        if [[ -n "${lb_config}" ]]; then
-            echo "${lb_config}" >> "${config_file}"
-        fi
-
-        print_success "Service '${svc_name}' added (${svc_type} -> ${local_addr})"
-        echo ""
-        echo -n "  Add another service? (y/n): "; read -r add_more
-    done
-}
-
-# ─── Systemd Service Management ────────────────────────────────
-# ─── Systemd Service Management ────────────────────────────────
+# ─── Service Management ────────────────────────────────────────
 
 start_service() {
     echo ""
-    echo -e "  ${BOLD}Start Service${NC}"
-    echo -e "    ${GREEN}1)${NC} Server"
-    echo -e "    ${GREEN}2)${NC} Client"
-    echo -e "    ${GREEN}3)${NC} Both"
-    echo -n "  Choice: "; read -r choice
-
-    case "${choice}" in
-        1)
-            systemctl start "${SERVICE_PREFIX}-server" && \
-                print_success "Server started" || \
-                print_error "Failed to start server"
-            ;;
-        2)
-            systemctl start "${SERVICE_PREFIX}-client" && \
-                print_success "Client started" || \
-                print_error "Failed to start client"
-            ;;
-        3)
-            systemctl start "${SERVICE_PREFIX}-server" 2>/dev/null && print_success "Server started"
-            systemctl start "${SERVICE_PREFIX}-client" 2>/dev/null && print_success "Client started"
-            ;;
-        *) print_error "Invalid choice" ;;
+    echo -e "    ${GREEN}1)${NC} Server  ${GREEN}2)${NC} Client  ${GREEN}3)${NC} Both"
+    echo -n "  Choice: "; read -r c
+    case "${c}" in
+        1) systemctl start "${SERVICE_PREFIX}-server" && print_success "Server started" ;;
+        2) systemctl start "${SERVICE_PREFIX}-client" && print_success "Client started" ;;
+        3) systemctl start "${SERVICE_PREFIX}-server" 2>/dev/null; systemctl start "${SERVICE_PREFIX}-client" 2>/dev/null; print_success "Both started" ;;
     esac
 }
 
 stop_service() {
     echo ""
-    echo -e "  ${BOLD}Stop Service${NC}"
-    echo -e "    ${GREEN}1)${NC} Server"
-    echo -e "    ${GREEN}2)${NC} Client"
-    echo -e "    ${GREEN}3)${NC} Both"
-    echo -n "  Choice: "; read -r choice
-
-    case "${choice}" in
-        1) systemctl stop "${SERVICE_PREFIX}-server" 2>/dev/null && print_success "Server stopped" ;;
-        2) systemctl stop "${SERVICE_PREFIX}-client" 2>/dev/null && print_success "Client stopped" ;;
-        3)
-            systemctl stop "${SERVICE_PREFIX}-server" 2>/dev/null && print_success "Server stopped"
-            systemctl stop "${SERVICE_PREFIX}-client" 2>/dev/null && print_success "Client stopped"
-            ;;
-        *) print_error "Invalid choice" ;;
+    echo -e "    ${GREEN}1)${NC} Server  ${GREEN}2)${NC} Client  ${GREEN}3)${NC} Both"
+    echo -n "  Choice: "; read -r c
+    case "${c}" in
+        1) systemctl stop "${SERVICE_PREFIX}-server" && print_success "Server stopped" ;;
+        2) systemctl stop "${SERVICE_PREFIX}-client" && print_success "Client stopped" ;;
+        3) systemctl stop "${SERVICE_PREFIX}-server" 2>/dev/null; systemctl stop "${SERVICE_PREFIX}-client" 2>/dev/null; print_success "Both stopped" ;;
     esac
 }
 
 restart_service() {
     echo ""
-    echo -e "  ${BOLD}Restart Service${NC}"
-    echo -e "    ${GREEN}1)${NC} Server"
-    echo -e "    ${GREEN}2)${NC} Client"
-    echo -e "    ${GREEN}3)${NC} Both"
-    echo -n "  Choice: "; read -r choice
-
-    case "${choice}" in
+    echo -e "    ${GREEN}1)${NC} Server  ${GREEN}2)${NC} Client  ${GREEN}3)${NC} Both"
+    echo -n "  Choice: "; read -r c
+    case "${c}" in
         1) systemctl restart "${SERVICE_PREFIX}-server" && print_success "Server restarted" ;;
         2) systemctl restart "${SERVICE_PREFIX}-client" && print_success "Client restarted" ;;
-        3)
-            systemctl restart "${SERVICE_PREFIX}-server" 2>/dev/null && print_success "Server restarted"
-            systemctl restart "${SERVICE_PREFIX}-client" 2>/dev/null && print_success "Client restarted"
-            ;;
-        *) print_error "Invalid choice" ;;
+        3) systemctl restart "${SERVICE_PREFIX}-server" 2>/dev/null; systemctl restart "${SERVICE_PREFIX}-client" 2>/dev/null; print_success "Both restarted" ;;
     esac
 }
 
 show_status() {
     echo ""
     print_divider
-    echo -e "  ${BOLD}Rathole Pro Status${NC}"
+    echo -e "  ${BOLD}Status${NC}"
     print_divider
     echo ""
 
-    # Server status
     if systemctl is-active "${SERVICE_PREFIX}-server" &>/dev/null; then
-        echo -e "  Server:  ${GREEN}● Running${NC}"
-        local server_pid
-        server_pid=$(systemctl show -p MainPID "${SERVICE_PREFIX}-server" 2>/dev/null | cut -d= -f2)
-        if [[ "${server_pid}" != "0" ]] && [[ -n "${server_pid}" ]]; then
-            echo -e "           PID: ${server_pid}"
-        fi
+        echo -e "  Server: ${GREEN}● Running${NC}"
     elif systemctl is-enabled "${SERVICE_PREFIX}-server" &>/dev/null 2>&1; then
-        echo -e "  Server:  ${YELLOW}● Stopped (enabled)${NC}"
+        echo -e "  Server: ${YELLOW}● Stopped${NC}"
     else
-        echo -e "  Server:  ${DIM}○ Not configured${NC}"
+        echo -e "  Server: ${DIM}○ Not configured${NC}"
     fi
 
-    # Client status
     if systemctl is-active "${SERVICE_PREFIX}-client" &>/dev/null; then
-        echo -e "  Client:  ${GREEN}● Running${NC}"
-        local client_pid
-        client_pid=$(systemctl show -p MainPID "${SERVICE_PREFIX}-client" 2>/dev/null | cut -d= -f2)
-        if [[ "${client_pid}" != "0" ]] && [[ -n "${client_pid}" ]]; then
-            echo -e "           PID: ${client_pid}"
-        fi
+        echo -e "  Client: ${GREEN}● Running${NC}"
     elif systemctl is-enabled "${SERVICE_PREFIX}-client" &>/dev/null 2>&1; then
-        echo -e "  Client:  ${YELLOW}● Stopped (enabled)${NC}"
+        echo -e "  Client: ${YELLOW}● Stopped${NC}"
     else
-        echo -e "  Client:  ${DIM}○ Not configured${NC}"
+        echo -e "  Client: ${DIM}○ Not configured${NC}"
     fi
 
     echo ""
-
-    # Config files
-    if [[ -f "${CONFIG_DIR}/server.toml" ]]; then
-        local transport
-        transport=$(grep -m1 'type' "${CONFIG_DIR}/server.toml" 2>/dev/null | head -1 | cut -d'"' -f2)
-        echo -e "  Server config:  ${GREEN}${CONFIG_DIR}/server.toml${NC} [${transport:-tcp}]"
-    fi
-    if [[ -f "${CONFIG_DIR}/client.toml" ]]; then
-        local transport
-        transport=$(grep -m1 'type' "${CONFIG_DIR}/client.toml" 2>/dev/null | head -1 | cut -d'"' -f2)
-        echo -e "  Client config:  ${GREEN}${CONFIG_DIR}/client.toml${NC} [${transport:-tcp}]"
-    fi
-
-    # Binary info
-    if [[ -x "${RATHOLE_PRO_DIR}/${BINARY_NAME}" ]]; then
-        echo -e "  Binary:         ${GREEN}${RATHOLE_PRO_DIR}/${BINARY_NAME}${NC}"
-    else
-        echo -e "  Binary:         ${RED}Not installed${NC}"
-    fi
-
+    [[ -f "${CONFIG_DIR}/server.toml" ]] && echo -e "  Server config: ${CONFIG_DIR}/server.toml"
+    [[ -f "${CONFIG_DIR}/client.toml" ]] && echo -e "  Client config: ${CONFIG_DIR}/client.toml"
     echo ""
 }
 
 view_logs() {
     echo ""
-    echo -e "  ${BOLD}View Logs${NC}"
-    echo -e "    ${GREEN}1)${NC} Server logs"
-    echo -e "    ${GREEN}2)${NC} Client logs"
-    echo -e "    ${GREEN}3)${NC} Live server logs (follow)"
-    echo -e "    ${GREEN}4)${NC} Live client logs (follow)"
-    echo -n "  Choice: "; read -r choice
-
-    case "${choice}" in
+    echo -e "    ${GREEN}1)${NC} Server  ${GREEN}2)${NC} Client  ${GREEN}3)${NC} Server (live)  ${GREEN}4)${NC} Client (live)"
+    echo -n "  Choice: "; read -r c
+    case "${c}" in
         1) journalctl -u "${SERVICE_PREFIX}-server" --no-pager -n 50 ;;
         2) journalctl -u "${SERVICE_PREFIX}-client" --no-pager -n 50 ;;
         3) journalctl -u "${SERVICE_PREFIX}-server" -f ;;
         4) journalctl -u "${SERVICE_PREFIX}-client" -f ;;
-        *) print_error "Invalid choice" ;;
     esac
 }
 
 view_config() {
     echo ""
-    echo -e "  ${BOLD}View Configuration${NC}"
-    echo -e "    ${GREEN}1)${NC} Server config"
-    echo -e "    ${GREEN}2)${NC} Client config"
-    echo -n "  Choice: "; read -r choice
-
-    case "${choice}" in
-        1)
-            if [[ -f "${CONFIG_DIR}/server.toml" ]]; then
-                echo ""
-                print_divider
-                cat "${CONFIG_DIR}/server.toml"
-                print_divider
-            else
-                print_warning "No server config found"
-            fi
-            ;;
-        2)
-            if [[ -f "${CONFIG_DIR}/client.toml" ]]; then
-                echo ""
-                print_divider
-                cat "${CONFIG_DIR}/client.toml"
-                print_divider
-            else
-                print_warning "No client config found"
-            fi
-            ;;
-        *) print_error "Invalid choice" ;;
+    echo -e "    ${GREEN}1)${NC} Server  ${GREEN}2)${NC} Client"
+    echo -n "  Choice: "; read -r c
+    case "${c}" in
+        1) [[ -f "${CONFIG_DIR}/server.toml" ]] && cat "${CONFIG_DIR}/server.toml" || print_warning "No server config" ;;
+        2) [[ -f "${CONFIG_DIR}/client.toml" ]] && cat "${CONFIG_DIR}/client.toml" || print_warning "No client config" ;;
     esac
-}
-
-# ─── Uninstall ─────────────────────────────────────────────────
-
-uninstall() {
-    echo ""
-    print_divider
-    echo -e "  ${RED}${BOLD}Uninstall Rathole Pro${NC}"
-    print_divider
-    echo ""
-    print_warning "This will remove:"
-    echo "    - Binary: ${RATHOLE_PRO_DIR}/"
-    echo "    - Config: ${CONFIG_DIR}/"
-    echo "    - Logs:   ${LOG_DIR}/"
-    echo "    - Symlink: /usr/local/bin/${BINARY_NAME}"
-    echo "    - Systemd services"
-    echo ""
-    echo -n "  Type 'yes' to confirm: "
-    read -r answer
-    if [[ "$answer" != "yes" ]]; then
-        print_info "Cancelled."
-        return
-    fi
-
-    echo ""
-    print_step "Stopping services..."
-    systemctl stop "${SERVICE_PREFIX}-server" 2>/dev/null || true
-    systemctl stop "${SERVICE_PREFIX}-client" 2>/dev/null || true
-    systemctl disable "${SERVICE_PREFIX}-server" 2>/dev/null || true
-    systemctl disable "${SERVICE_PREFIX}-client" 2>/dev/null || true
-
-    print_step "Removing service files..."
-    rm -f "/etc/systemd/system/${SERVICE_PREFIX}-server.service"
-    rm -f "/etc/systemd/system/${SERVICE_PREFIX}-client.service"
-    systemctl daemon-reload 2>/dev/null || true
-
-    print_step "Removing files..."
-    rm -rf "${RATHOLE_PRO_DIR}"
-    rm -rf "${CONFIG_DIR}"
-    rm -rf "${LOG_DIR}"
-    rm -f "/usr/local/bin/${BINARY_NAME}"
-
-    echo ""
-    print_success "Rathole Pro completely uninstalled."
 }
 
 # ─── Update ────────────────────────────────────────────────────
 
 update_binary() {
     echo ""
-    print_divider
-    echo -e "  ${BOLD}Update Rathole Pro${NC}"
-    print_divider
-    echo ""
-
+    print_step "Updating RatholePro..."
     detect_arch
 
-    local current_version="unknown"
-    if [[ -x "${RATHOLE_PRO_DIR}/${BINARY_NAME}" ]]; then
-        current_version=$(${RATHOLE_PRO_DIR}/${BINARY_NAME} --version 2>/dev/null | awk '{print $NF}' || echo "unknown")
-    fi
-    print_info "Current version: ${current_version}"
-    print_info "Latest version: ${APP_VERSION}"
+    local server_was_running=false client_was_running=false
+    systemctl is-active "${SERVICE_PREFIX}-server" &>/dev/null && server_was_running=true
+    systemctl is-active "${SERVICE_PREFIX}-client" &>/dev/null && client_was_running=true
 
-    if ! confirm_action "Download and install v${APP_VERSION}?"; then
-        return
-    fi
+    [[ "${server_was_running}" == true ]] && systemctl stop "${SERVICE_PREFIX}-server"
+    [[ "${client_was_running}" == true ]] && systemctl stop "${SERVICE_PREFIX}-client"
 
-    # Stop services temporarily
-    local server_was_running=false
-    local client_was_running=false
-
-    if systemctl is-active "${SERVICE_PREFIX}-server" &>/dev/null; then
-        server_was_running=true
-        systemctl stop "${SERVICE_PREFIX}-server"
-    fi
-    if systemctl is-active "${SERVICE_PREFIX}-client" &>/dev/null; then
-        client_was_running=true
-        systemctl stop "${SERVICE_PREFIX}-client"
-    fi
-
-    # Download new binary
     download_binary
 
-    # Restart services
-    if [[ "${server_was_running}" == true ]]; then
-        systemctl start "${SERVICE_PREFIX}-server" && print_success "Server restarted"
-    fi
-    if [[ "${client_was_running}" == true ]]; then
-        systemctl start "${SERVICE_PREFIX}-client" && print_success "Client restarted"
-    fi
+    [[ "${server_was_running}" == true ]] && systemctl start "${SERVICE_PREFIX}-server" && print_success "Server restarted"
+    [[ "${client_was_running}" == true ]] && systemctl start "${SERVICE_PREFIX}-client" && print_success "Client restarted"
 
     print_success "Update complete!"
+}
+
+# ─── Uninstall ─────────────────────────────────────────────────
+
+uninstall() {
+    echo ""
+    print_warning "This will remove RatholePro completely."
+    echo -n "  Type 'yes' to confirm: "; read -r answer
+    [[ "$answer" != "yes" ]] && return
+
+    systemctl stop "${SERVICE_PREFIX}-server" 2>/dev/null || true
+    systemctl stop "${SERVICE_PREFIX}-client" 2>/dev/null || true
+    systemctl disable "${SERVICE_PREFIX}-server" 2>/dev/null || true
+    systemctl disable "${SERVICE_PREFIX}-client" 2>/dev/null || true
+    rm -f "/etc/systemd/system/${SERVICE_PREFIX}-server.service"
+    rm -f "/etc/systemd/system/${SERVICE_PREFIX}-client.service"
+    systemctl daemon-reload 2>/dev/null || true
+    rm -rf "${RATHOLE_PRO_DIR}"
+    rm -rf "${CONFIG_DIR}"
+    rm -rf "${LOG_DIR}"
+    rm -f "/usr/local/bin/${BINARY_NAME}"
+
+    print_success "RatholePro completely uninstalled."
 }
 
 # ─── Main Menu ─────────────────────────────────────────────────
@@ -1161,23 +767,22 @@ main_menu() {
         echo -e "    ${GREEN} 1)${NC} Install Binary"
         echo ""
         echo -e "    ${CYAN}── Setup Tunnel ──${NC}"
-        echo -e "    ${GREEN} 2)${NC} Configure IRAN Server   ${DIM}(users connect to Iran IP)${NC}"
-        echo -e "    ${GREEN} 3)${NC} Configure KHAREJ Server ${DIM}(panel/service runs here)${NC}"
+        echo -e "    ${GREEN} 2)${NC} Configure IRAN Server   ${DIM}(users connect here)${NC}"
+        echo -e "    ${GREEN} 3)${NC} Configure KHAREJ Server ${DIM}(services run here)${NC}"
         echo ""
         echo -e "    ${CYAN}── Manage ──${NC}"
-        echo -e "    ${GREEN} 4)${NC} Start Service"
-        echo -e "    ${GREEN} 5)${NC} Stop Service"
-        echo -e "    ${GREEN} 6)${NC} Restart Service"
-        echo -e "    ${GREEN} 7)${NC} View Status"
-        echo ""
-        echo -e "    ${GREEN} 8)${NC} View Logs"
+        echo -e "    ${GREEN} 4)${NC} Start"
+        echo -e "    ${GREEN} 5)${NC} Stop"
+        echo -e "    ${GREEN} 6)${NC} Restart"
+        echo -e "    ${GREEN} 7)${NC} Status"
+        echo -e "    ${GREEN} 8)${NC} Logs"
         echo -e "    ${GREEN} 9)${NC} View Config"
-        echo -e "    ${GREEN}10)${NC} Update Binary"
+        echo -e "    ${GREEN}10)${NC} Update"
         echo -e "    ${GREEN}11)${NC} Uninstall"
         echo ""
         echo -e "    ${RED} 0)${NC} Exit"
         echo ""
-        echo -n "  Select option: "; read -r choice
+        echo -n "  Select: "; read -r choice
 
         case "${choice}" in
             1)  full_install ;;
@@ -1191,21 +796,14 @@ main_menu() {
             9)  view_config ;;
             10) check_root; update_binary ;;
             11) check_root; uninstall ;;
-            0)
-                echo ""
-                echo -e "  ${DIM}Goodbye!${NC}"
-                echo ""
-                exit 0
-                ;;
+            0)  echo -e "\n  ${DIM}Goodbye!${NC}\n"; exit 0 ;;
             *)  print_error "Invalid option" ;;
         esac
 
         echo ""
-        echo ""
-        echo -e "  ${YELLOW}───── Press Enter to return to menu ─────${NC}"
-        echo -n ""; read -r _
+        echo -n "  Press Enter..."; read -r _
     done
 }
 
-# ─── Entry Point ───────────────────────────────────────────────
+# ─── Entry ─────────────────────────────────────────────────────
 main_menu

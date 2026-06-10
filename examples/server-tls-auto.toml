@@ -1,0 +1,20 @@
+# RatholePro - Server with Auto TLS (no domain needed!)
+# Just set auto_cert = true and it works.
+# Certificate is generated automatically on first run.
+
+[server]
+bind_addr = "0.0.0.0:2333"
+default_token = "my_secret_token"
+heartbeat_interval = 30
+
+[server.transport]
+type = "tls"
+
+[server.transport.tls]
+auto_cert = true          # That's it! No domain, no manual cert needed.
+# cert_dir = "./certs"    # Optional: where to store (default: ./certs)
+# hosts = ["1.2.3.4"]     # Optional: extra IPs/domains (auto-detects local IPs)
+
+[server.services.web]
+bind_addr = "0.0.0.0:8080"
+max_mux_streams = 16

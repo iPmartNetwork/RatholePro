@@ -1,5 +1,22 @@
+# Build output
 /target
+*.exe
+*.exe~
+
+# Go
+go-core/rathole-pro
+go-core/rathole-pro.exe
+go-core/rathole-pro.exe~
+
+# Rust (legacy)
 Cargo.lock
+
+# Editor
 *.swp
 *.swo
+
+# Env
 .env
+
+# Certs (auto-generated)
+certs/

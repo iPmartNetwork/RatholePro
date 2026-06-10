@@ -1,0 +1,21 @@
+# RatholePro - Client with Auto TLS (no domain needed!)
+# When server uses auto_cert, client just connects with encryption.
+# No trusted_root needed — skips CA check (self-signed mode).
+
+[client]
+remote_addr = "1.2.3.4:2333"       # Server IP (no domain required)
+default_token = "my_secret_token"
+mux_connections = 4
+
+[client.transport]
+type = "tls"
+
+[client.transport.tls]
+# Nothing needed here! Encryption is active, no cert verification.
+# If you want strict verification, copy server's certs/rathole-pro.crt here:
+# trusted_root = "./rathole-pro.crt"
+# hostname = "1.2.3.4"
+
+[client.services.web]
+local_addr = "127.0.0.1:80"
+mux_streams = 16
