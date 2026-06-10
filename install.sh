@@ -485,68 +485,60 @@ configure_server() {
     echo ""
     print_divider
     echo -e "  ${BOLD}Server Configuration${NC}"
+    echo -e "  ${DIM}(Server = this machine LISTENS for tunnel connections)${NC}"
+    echo -e "  ${DIM}(Install Server on the machine that RECEIVES connections from users)${NC}"
     print_divider
     echo ""
 
-    # Basic settings
-    echo -n "  Bind port [2333]: "; read -r server_port
+    echo -e "  ${CYAN}Tunnel port (clients connect TO this port):${NC}"
+    echo -n "  Port [2333]: "; read -r server_port
     server_port="${server_port:-2333}"
+    bind_addr="0.0.0.0:${server_port}"
 
-    # IPv6 support
-    echo -n "  Bind on IPv6 too? (y/n) [n]: "; read -r use_ipv6
-    if [[ "${use_ipv6}" =~ ^[Yy]$ ]]; then
-        bind_addr="[::]:${server_port}"
-    else
-        bind_addr="0.0.0.0:${server_port}"
-    fi
-
-    # Token
-    echo -n "  Default token (empty=auto-generate): "; read -r default_token
+    echo ""
+    echo -e "  ${CYAN}Authentication token (shared secret between server & client):${NC}"
+    echo -n "  Token (empty=auto): "; read -r default_token
     if [[ -z "${default_token}" ]]; then
         default_token=$(generate_token)
-        echo -e "  ${GREEN}Generated token:${NC} ${default_token}"
+        echo -e "  ${GREEN}Generated:${NC} ${default_token}"
     fi
 
-    echo -n "  Heartbeat interval (seconds) [30]: "; read -r heartbeat
-    heartbeat="${heartbeat:-30}"
-
-    # Transport
+    echo ""
+    echo -e "  ${CYAN}Transport (how data is encrypted/transferred):${NC}"
     select_transport
 
     # Write config
     mkdir -p "${CONFIG_DIR}"
     local config_file="${CONFIG_DIR}/server.toml"
-
     cat > "${config_file}" << EOF
-# Rathole Pro Server Configuration
-# Generated: $(date -Iseconds)
-# Transport: ${TRANSPORT}
-
 [server]
 bind_addr = "${bind_addr}"
 default_token = "${default_token}"
-heartbeat_interval = ${heartbeat}
-prefer_ipv6 = ${use_ipv6:-false}
+heartbeat_interval = 30
 EOF
-
-    # Transport config
     configure_transport_server "${config_file}"
 
     # Services
     echo ""
     print_divider
-    echo -e "  ${BOLD}Add Services${NC}"
+    echo -e "  ${BOLD}Add Services (ports to expose)${NC}"
+    echo -e "  ${DIM}Each service = one port that users can connect to on THIS server${NC}"
+    echo -e "  ${DIM}Traffic is forwarded through tunnel to the Client machine${NC}"
     print_divider
     add_services_server "${config_file}"
 
     echo ""
     print_success "Server config saved: ${config_file}"
     echo ""
-    echo -e "  ${YELLOW}╔══ Important ══╗${NC}"
-    echo -e "  ${YELLOW}║${NC} Token: ${BOLD}${default_token}${NC}"
-    echo -e "  ${YELLOW}║${NC} Save this! Clients need it to connect."
-    echo -e "  ${YELLOW}╚═══════════════╝${NC}"
+    echo -e "  ${YELLOW}════════════════════════════════════════════${NC}"
+    echo -e "  ${YELLOW}  SAVE THIS INFO FOR CLIENT SETUP:${NC}"
+    echo -e "  ${YELLOW}  Token:  ${default_token}${NC}"
+    echo -e "  ${YELLOW}  Port:   ${server_port}${NC}"
+    echo -e "  ${YELLOW}════════════════════════════════════════════${NC}"
     echo ""
+
+    create_systemd_service "server"
+}
 
     # Create systemd service
     create_systemd_service "server"
@@ -611,84 +603,49 @@ configure_client() {
     echo ""
     print_divider
     echo -e "  ${BOLD}Client Configuration${NC}"
+    echo -e "  ${DIM}(Client = this machine has a LOCAL SERVICE to expose)${NC}"
+    echo -e "  ${DIM}(Client connects TO the Server and forwards local traffic)${NC}"
     print_divider
     echo ""
 
-    # Server address
-    echo -n "  Server address (ip:port or [ipv6]:port): "; read -r remote_addr
+    echo -e "  ${CYAN}Server address (IP:PORT of the SERVER machine):${NC}"
+    echo -n "  Server address: "; read -r remote_addr
     if [[ -z "${remote_addr}" ]]; then
         print_error "Server address is required!"
         return 1
     fi
 
-    # Token
-    echo -n "  Default token: "; read -r default_token
+    echo ""
+    echo -e "  ${CYAN}Token (must match the Server's token):${NC}"
+    echo -n "  Token: "; read -r default_token
     if [[ -z "${default_token}" ]]; then
         print_error "Token is required!"
         return 1
     fi
 
-    echo -n "  Retry interval (seconds) [3]: "; read -r retry
-    retry="${retry:-3}"
-
-    echo -n "  Mux connections per service [4]: "; read -r mux_conn
-    mux_conn="${mux_conn:-4}"
-
-    # IPv6
-    echo -n "  Prefer IPv6? (y/n) [n]: "; read -r prefer_ipv6
-    [[ "${prefer_ipv6}" =~ ^[Yy]$ ]] && prefer_ipv6="true" || prefer_ipv6="false"
-
-    # Transport
+    echo ""
+    echo -e "  ${CYAN}Transport (must match Server's transport):${NC}"
     select_transport
 
     # Write config
     mkdir -p "${CONFIG_DIR}"
     local config_file="${CONFIG_DIR}/client.toml"
-
     cat > "${config_file}" << EOF
-# Rathole Pro Client Configuration
-# Generated: $(date -Iseconds)
-# Transport: ${TRANSPORT}
-
 [client]
 remote_addr = "${remote_addr}"
 default_token = "${default_token}"
 heartbeat_timeout = 40
-retry_interval = ${retry}
-mux_connections = ${mux_conn}
-prefer_ipv6 = ${prefer_ipv6}
+retry_interval = 3
+mux_connections = 4
 EOF
-
-    # Transport config
     configure_transport_client "${config_file}" "${remote_addr}"
-
-    # HTTP proxy (optional)
-    echo ""
-    echo -n "  Use HTTP/SOCKS5 proxy? (y/n) [n]: "; read -r use_proxy
-    if [[ "${use_proxy}" =~ ^[Yy]$ ]]; then
-        echo -n "  Proxy URL (http://host:port or socks5://host:port): "; read -r proxy_url
-        if [[ -n "${proxy_url}" ]]; then
-            cat >> "${config_file}" << EOF
-
-[client.http_proxy]
-url = "${proxy_url}"
-EOF
-            echo -n "  Proxy username (empty=none): "; read -r proxy_user
-            if [[ -n "${proxy_user}" ]]; then
-                echo -n "  Proxy password: "; read -rs proxy_pass
-                echo ""
-                cat >> "${config_file}" << EOF
-username = "${proxy_user}"
-password = "${proxy_pass}"
-EOF
-            fi
-        fi
-    fi
 
     # Services
     echo ""
     print_divider
-    echo -e "  ${BOLD}Add Services${NC}"
+    echo -e "  ${BOLD}Add Services (local ports to forward)${NC}"
+    echo -e "  ${DIM}Service name MUST match the Server's service name exactly!${NC}"
+    echo -e "  ${DIM}Local address = where YOUR service runs on THIS machine${NC}"
     print_divider
     add_services_client "${config_file}"
 
@@ -696,7 +653,6 @@ EOF
     print_success "Client config saved: ${config_file}"
     echo ""
 
-    # Create systemd service
     create_systemd_service "client"
 }
 
@@ -1110,9 +1066,9 @@ main_menu() {
         print_banner
         echo -e "  ${BOLD}Main Menu${NC}"
         echo ""
-        echo -e "    ${GREEN} 1)${NC} Install Rathole Pro"
-        echo -e "    ${GREEN} 2)${NC} Configure Server"
-        echo -e "    ${GREEN} 3)${NC} Configure Client"
+        echo -e "    ${GREEN} 1)${NC} Install Binary (download rathole-pro)"
+        echo -e "    ${GREEN} 2)${NC} Configure Server ${DIM}(this machine LISTENS, users connect here)${NC}"
+        echo -e "    ${GREEN} 3)${NC} Configure Client ${DIM}(this machine has a local service to forward)${NC}"
         echo ""
         echo -e "    ${GREEN} 4)${NC} Start Service"
         echo -e "    ${GREEN} 5)${NC} Stop Service"
