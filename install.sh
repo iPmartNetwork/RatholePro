@@ -5,10 +5,10 @@
 # Next-generation reverse proxy tunnel with multiplexing,
 # multi-transport, load balancing, P2P, and UDP support.
 # Developer: iPmart Network (Ali Hassanzadeh)
-# Version: 0.1.0
+# Version: 0.3.0
 # ═══════════════════════════════════════════════════════════════
 
-set -euo pipefail
+set -eo pipefail
 
 # ─── Colors ────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -72,19 +72,19 @@ check_root() {
 }
 
 detect_os() {
+    OS="linux"
+    OS_VERSION="unknown"
+    OS_NAME="Linux"
     if [[ -f /etc/os-release ]]; then
-        OS=$(grep -m1 '^ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
-        OS_VERSION=$(grep -m1 '^VERSION_ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
-        OS_NAME=$(grep -m1 '^PRETTY_NAME=' /etc/os-release | cut -d= -f2 | tr -d '"')
+        OS=$(grep -m1 '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"') || true
+        OS_VERSION=$(grep -m1 '^VERSION_ID=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"') || true
+        OS_NAME=$(grep -m1 '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"') || true
         OS="${OS:-linux}"
         OS_VERSION="${OS_VERSION:-unknown}"
-        OS_NAME="${OS_NAME:-${OS}}"
+        OS_NAME="${OS_NAME:-Linux}"
     elif [[ -f /etc/redhat-release ]]; then
         OS="centos"
         OS_NAME=$(cat /etc/redhat-release)
-    else
-        OS="unknown"
-        OS_NAME="Unknown Linux"
     fi
     print_info "OS: ${OS_NAME}"
 }
