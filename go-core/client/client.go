@@ -169,12 +169,12 @@ func applyClientTransport(conn net.Conn, cc *config.ClientConfig) (net.Conn, err
 	case "noise":
 		return transport.NoiseClientUpgrade(conn, cc.Transport.Noise)
 	case "ws":
-		host := cc.RemoteAddr
-		if err := transport.WSClientUpgrade(conn, host, cc.Transport.WebSocket); err != nil {
+		upgraded, err := transport.WSClientUpgrade(conn, cc.RemoteAddr, cc.Transport.WebSocket)
+		if err != nil {
 			conn.Close()
 			return nil, err
 		}
-		return conn, nil
+		return upgraded, nil
 	}
 	return conn, nil
 }

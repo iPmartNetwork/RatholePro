@@ -184,11 +184,12 @@ func applyServerTransport(conn net.Conn, t *config.TransportConfig) (net.Conn, e
 	case "noise":
 		return transport.NoiseServerUpgrade(conn, t.Noise)
 	case "ws":
-		if err := transport.WSServerUpgrade(conn, t.WebSocket); err != nil {
+		upgraded, err := transport.WSServerUpgrade(conn, t.WebSocket)
+		if err != nil {
 			conn.Close()
 			return nil, err
 		}
-		return conn, nil
+		return upgraded, nil
 	}
 	return conn, nil
 }
