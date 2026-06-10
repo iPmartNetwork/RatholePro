@@ -1,6 +1,6 @@
 use crate::config::{ClientConfig, ClientServiceConfig, Config};
 use crate::mux::{self, StreamId};
-use crate::protocol::{self, AuthRequest, AuthResponse, Message, MessageCodec};
+use crate::protocol::{self, AuthRequest, Message, MessageCodec};
 use crate::transport::{self, BoxedStream, TransportType};
 use anyhow::Result;
 use futures::{SinkExt, StreamExt};

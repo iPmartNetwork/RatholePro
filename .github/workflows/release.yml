@@ -2,13 +2,11 @@ name: Build & Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
-  BINARY_NAME: rathole-pro
 
 jobs:
   build:
@@ -16,57 +14,38 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
-            asset_name: rathole-pro-x86_64-linux
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04
-            asset_name: rathole-pro-aarch64-linux
-            use_cross: true
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            asset_name: rathole-pro-x86_64-windows.exe
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            asset_name: rathole-pro-x86_64-macos
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            name: rathole-pro-x86_64-linux
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: rathole-pro-x86_64-windows.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            name: rathole-pro-x86_64-macos
 
     runs-on: ${{ matrix.os }}
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross
-        if: matrix.use_cross == true
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build with cross
-        if: matrix.use_cross == true
-        run: cross build --release --target ${{ matrix.target }}
-
-      - name: Build native
-        if: matrix.use_cross != true
+      - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
-        run: |
-          cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} ${{ matrix.asset_name }}
-          chmod +x ${{ matrix.asset_name }}
+        run: cp target/${{ matrix.target }}/release/rathole-pro ${{ matrix.name }} && chmod +x ${{ matrix.name }}
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
-        run: cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe ${{ matrix.asset_name }}
+        run: cp target/${{ matrix.target }}/release/rathole-pro.exe ${{ matrix.name }}
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
 
   release:
     needs: build
@@ -74,46 +53,28 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
-
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      - name: Prepare
-        run: |
-          mkdir -p release
-          find artifacts -type f -exec cp {} release/ \;
-          ls -la release/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+      - run: mkdir release && find artifacts -type f -exec cp {} release/ \;
+      - uses: softprops/action-gh-release@v2
         with:
           name: "RatholePro ${{ github.ref_name }}"
           body: |
             ## RatholePro ${{ github.ref_name }}
-            
             **Developer:** iPmart Network (Ali Hassanzadeh)
             
-            ### What's New
+            ### Features
             - TCP + TLS + Noise Protocol transports
-            - UDP forwarding (WireGuard, DNS, games)
-            - Stream multiplexing over single connection
-            - `--gen-key` for Noise keypair generation
-            - `--validate` for config testing
+            - UDP forwarding
+            - Stream multiplexing
+            - `--gen-key` Noise keypair generator
+            - `--validate` config checker
             
-            ### Install (Linux)
+            ### Install
             ```bash
             bash <(curl -Ls https://raw.githubusercontent.com/iPmartNetwork/RatholePro/master/install.sh)
             ```
-            
-            ### Manual Download
-            | Platform | File |
-            |----------|------|
-            | Linux x86_64 | `rathole-pro-x86_64-linux` |
-            | Linux ARM64 | `rathole-pro-aarch64-linux` |
-            | Windows x64 | `rathole-pro-x86_64-windows.exe` |
-            | macOS x64 | `rathole-pro-x86_64-macos` |
           files: release/*
           fail_on_unmatched_files: false
