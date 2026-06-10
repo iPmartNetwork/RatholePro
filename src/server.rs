@@ -1,6 +1,7 @@
 use crate::config::{Config, ServerConfig};
 use crate::mux::{self, Multiplexer};
 use crate::protocol::{self, AuthResponse, Message, MessageCodec};
+use crate::transport::{self, BoxedStream, TransportType};
 use anyhow::Result;
 use futures::{SinkExt, StreamExt};
 use std::collections::HashMap;
@@ -13,18 +14,46 @@ use uuid::Uuid;
 
 pub async fn run(config: Config) -> Result<()> {
     let sc = config.server.ok_or_else(|| anyhow::anyhow!("No [server] config"))?;
+
+    let transport_type = sc.transport.as_ref()
+        .map(|t| TransportType::from_str(&t.transport_type))
+        .unwrap_or(TransportType::Tcp);
+
+    // Create TLS acceptor if needed
+    let tls_acceptor = if transport_type == TransportType::Tls {
+        let tls_cfg = sc.transport.as_ref().and_then(|t| t.tls.as_ref())
+            .ok_or_else(|| anyhow::anyhow!("TLS needs [server.transport.tls]"))?;
+        let cert = tls_cfg.cert.as_deref().ok_or_else(|| anyhow::anyhow!("TLS needs cert"))?;
+        let key = tls_cfg.key.as_deref().ok_or_else(|| anyhow::anyhow!("TLS needs key"))?;
+        Some(transport::tls::create_acceptor(cert, key)?)
+    } else { None };
+
+    let noise_key = if transport_type == TransportType::Noise {
+        sc.transport.as_ref().and_then(|t| t.noise.as_ref())
+            .and_then(|n| n.local_private_key.clone())
+    } else { None };
+
     let listener = TcpListener::bind(&sc.bind_addr).await?;
-    tracing::info!("Server listening on {}", sc.bind_addr);
+    tracing::info!("Server on {} [transport={:?}]", sc.bind_addr, transport_type);
 
     let sc = Arc::new(sc);
     let svc_listeners = start_svc_listeners(&sc).await?;
 
     loop {
-        let (stream, addr) = listener.accept().await?;
-        tracing::info!("Client from {}", addr);
+        let (tcp, addr) = listener.accept().await?;
         let cfg = sc.clone();
         let svcs = svc_listeners.clone();
+        let tt = transport_type.clone();
+        let acc = tls_acceptor.clone();
+        let nk = noise_key.clone();
+
         tokio::spawn(async move {
+            let stream = match transport::server_accept(
+                tcp, &tt, acc.as_ref(), nk.as_deref()
+            ).await {
+                Ok(s) => s,
+                Err(e) => { tracing::error!("{}: transport: {}", addr, e); return; }
+            };
             if let Err(e) = handle(stream, cfg, svcs).await {
                 tracing::error!("{}: {}", addr, e);
             }
@@ -35,20 +64,22 @@ pub async fn run(config: Config) -> Result<()> {
 async fn start_svc_listeners(c: &ServerConfig) -> Result<Arc<HashMap<String, Arc<TcpListener>>>> {
     let mut m = HashMap::new();
     for (name, svc) in &c.services {
-        if svc.service_type == "udp" { continue; }
+        if svc.service_type == "udp" {
+            tracing::info!("Service '{}' (UDP) on {}", name, svc.bind_addr);
+            continue;
+        }
         let l = TcpListener::bind(&svc.bind_addr).await?;
-        tracing::info!("Service '{}' on {}", name, svc.bind_addr);
+        tracing::info!("Service '{}' (TCP) on {}", name, svc.bind_addr);
         m.insert(name.clone(), Arc::new(l));
     }
     Ok(Arc::new(m))
 }
 
 async fn handle(
-    stream: TcpStream,
+    stream: BoxedStream,
     config: Arc<ServerConfig>,
     svc_listeners: Arc<HashMap<String, Arc<TcpListener>>>,
 ) -> Result<()> {
-    stream.set_nodelay(true)?;
     let mut framed = Framed::new(stream, MessageCodec);
 
     let auth = match framed.next().await {
@@ -72,23 +103,55 @@ async fn handle(
     }
 
     let sid = Uuid::new_v4().to_string();
-    tracing::info!("Auth OK '{}' session={}", auth.service_name, sid);
+    tracing::info!("Auth OK '{}' [{}] session={}", auth.service_name, auth.service_type, sid);
     framed.send(Message::AuthResp(AuthResponse { success: true, message: "OK".into(), session_id: Some(sid) })).await?;
 
-    let tcp = framed.into_inner();
+    let control = framed.into_inner();
+
+    // UDP service
+    if svc.service_type == "udp" {
+        return handle_udp(control, &svc.bind_addr).await;
+    }
+
+    // TCP service
     let listener = svc_listeners.get(&auth.service_name)
         .ok_or_else(|| anyhow::anyhow!("No listener"))?.clone();
 
     if auth.mux_enabled {
-        mux_server(tcp, listener).await
+        mux_server(control, listener).await
     } else {
-        simple_server(tcp, listener).await
+        simple_server(control, listener).await
     }
 }
 
-async fn mux_server(control: TcpStream, listener: Arc<TcpListener>) -> Result<()> {
-    let (mut cr, cw) = control.into_split();
+async fn handle_udp(mut control: BoxedStream, bind_addr: &str) -> Result<()> {
+    let (cr, cw) = tokio::io::split(control);
     let cw = Arc::new(Mutex::new(cw));
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+
+    // Read mux frames -> channel
+    let mut cr = cr;
+    let read_task = tokio::spawn(async move {
+        loop {
+            match mux::read_frame(&mut cr).await {
+                Ok((sid, f, data)) => {
+                    if f == mux::FLAG_FIN { continue; }
+                    let _ = tx.send((sid, data)).await;
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let result = crate::udp::server_udp(bind_addr, cw, rx).await;
+    read_task.abort();
+    result
+}
+
+async fn mux_server(mut control: BoxedStream, listener: Arc<TcpListener>) -> Result<()> {
+    let (cr, cw) = tokio::io::split(control);
+    let cw = Arc::new(Mutex::new(cw));
+    let mut cr = cr;
     let muxer = Multiplexer::server();
     let streams: Arc<Mutex<HashMap<u32, tokio::sync::mpsc::Sender<Vec<u8>>>>> =
         Arc::new(Mutex::new(HashMap::new()));
@@ -138,11 +201,11 @@ async fn mux_server(control: TcpStream, listener: Arc<TcpListener>) -> Result<()
     }
 }
 
-async fn simple_server(control: TcpStream, listener: Arc<TcpListener>) -> Result<()> {
+async fn simple_server(mut control: BoxedStream, listener: Arc<TcpListener>) -> Result<()> {
     let (visitor, _) = listener.accept().await?;
     let _ = visitor.set_nodelay(true);
     let (mut vr, mut vw) = visitor.into_split();
-    let (mut cr, mut cw) = control.into_split();
+    let (mut cr, mut cw) = tokio::io::split(control);
     tokio::select! {
         _ = tokio::io::copy(&mut vr, &mut cw) => {}
         _ = tokio::io::copy(&mut cr, &mut vw) => {}
